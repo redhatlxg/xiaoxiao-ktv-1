@@ -1,8 +1,0 @@
-name = "xiaoxiao-ktv-license"
-main = "worker.js"
-compatibility_date = "2026-11-14"
-
-[[d1_databases]]
-binding = "LICENSE_DB"
-database_name = "xiaoxiao-ktv-license"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
