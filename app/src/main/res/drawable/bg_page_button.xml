@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <gradient android:startColor="#ffff175e" android:endColor="#ffff16d0" android:angle="0.0" android:type="linear" />
-    <corners android:radius="24.0dip" />
+<!-- 分页主操作：酒红渐变 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient android:startColor="#FFD94357" android:endColor="#FF8F1E32" android:angle="0" android:type="linear" />
+    <corners android:radius="8dp" />
+    <stroke android:width="1dp" android:color="#99E7BD70" />
 </shape>

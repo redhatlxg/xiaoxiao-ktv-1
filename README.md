@@ -4,23 +4,24 @@
 
 <h1 align="center">晓晓呀 · Xiao Xiao Ya</h1>
 
+<p align="center"><b>晓晓呀 KTV</b> · 独立品牌与持续维护。</p>
+
 <p align="center"><b>电视大屏当舞台，手机扫码当点歌台 —— 开机即唱的开源 KTV</b></p>
 
 <p align="center">
-  <a href="https://github.com/ktv668899/maidong-ktv/releases"><img src="https://img.shields.io/github/v/tag/ktv668899/maidong-ktv?label=release&amp;style=flat-square&amp;color=2f81f7&amp;sort=semver" alt="release"></a>
+  <a href="https://github.com/redhatlxg/xiaoxiao-ktv/releases"><img src="https://img.shields.io/github/v/tag/redhatlxg/xiaoxiao-ktv?label=release&amp;style=flat-square&amp;color=2f81f7&amp;sort=semver" alt="release"></a>
   <img src="https://img.shields.io/badge/platform-Android%20TV%20%7C%20Mobile-3DDC84?style=flat-square&amp;logo=android&amp;logoColor=white" alt="platform">
-  <img src="https://img.shields.io/badge/Android-5.0%2B%20(API%2021)-3DDC84?style=flat-square" alt="minSdk">
+  <img src="https://img.shields.io/badge/Android-4.4%2B%20(API%2019)-3DDC84?style=flat-square" alt="minSdk">
   <img src="https://img.shields.io/badge/Kotlin-1.9.22-7F52FF?style=flat-square&amp;logo=kotlin&amp;logoColor=white" alt="kotlin">
   <img src="https://img.shields.io/badge/Gradle-8.13-02303A?style=flat-square&amp;logo=gradle&amp;logoColor=white" alt="gradle">
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-学习交流%20%2F%20禁止商用-orange?style=flat-square" alt="license"></a>
+  <img src="https://img.shields.io/badge/license-按授权协议使用-blue?style=flat-square" alt="license">
 </p>
 
 <p align="center">
-  <a href="https://github.com/ktv668899/maidong-ktv/stargazers"><img src="https://img.shields.io/github/stars/ktv668899/maidong-ktv?style=flat-square&amp;logo=github&amp;label=stars" alt="stars"></a>
-  <a href="https://github.com/ktv668899/maidong-ktv/forks"><img src="https://img.shields.io/github/forks/ktv668899/maidong-ktv?style=flat-square&amp;logo=github&amp;label=forks" alt="forks"></a>
-  <a href="https://github.com/ktv668899/maidong-ktv/issues"><img src="https://img.shields.io/github/issues/ktv668899/maidong-ktv?style=flat-square&amp;color=e05d44" alt="issues"></a>
-  <img src="https://img.shields.io/github/last-commit/ktv668899/maidong-ktv?style=flat-square&amp;color=6f42c1" alt="last commit">
-  <a href="https://gitee.com/weishilong/maidong-ktv"><img src="https://img.shields.io/badge/Gitee-weishilong%2Fmaidong--ktv-C71D23?style=flat-square&amp;logo=gitee&amp;logoColor=white" alt="gitee"></a>
+  <a href="https://github.com/redhatlxg/xiaoxiao-ktv/stargazers"><img src="https://img.shields.io/github/stars/redhatlxg/xiaoxiao-ktv?style=flat-square&amp;logo=github&amp;label=stars" alt="stars"></a>
+  <a href="https://github.com/redhatlxg/xiaoxiao-ktv/forks"><img src="https://img.shields.io/github/forks/redhatlxg/xiaoxiao-ktv?style=flat-square&amp;logo=github&amp;label=forks" alt="forks"></a>
+  <a href="https://github.com/redhatlxg/xiaoxiao-ktv/issues"><img src="https://img.shields.io/github/issues/redhatlxg/xiaoxiao-ktv?style=flat-square&amp;color=e05d44" alt="issues"></a>
+  <img src="https://img.shields.io/github/last-commit/redhatlxg/xiaoxiao-ktv?style=flat-square&amp;color=6f42c1" alt="last commit">
 </p>
 
 <p align="center"><i>遥控器点歌 · 手机扫码 · 原伴唱切换 · 边下边唱 · 开源无广告</i></p>
@@ -38,8 +39,9 @@
 
 一句话：**把「KTV 包厢」搬回客厅，只花一台电视的钱。**
 
-> **仓库说明**：主仓在 [Gitee](https://gitee.com/weishilong/maidong-ktv)，本仓库为 GitHub 同步镜像，代码与标签保持对象级一致。
-> **内容框架来源**：[gitee.com/yangyachao-X/maidong-ktv](https://gitee.com/yangyachao-X/maidong-ktv) —— 本项目在其界面与功能框架基础上，用 **DSH（DeepSeek Harness）** 重写了内核与数据源（曲库同步、歌曲源接入、设备认证、风控应对、远程日志、广告拦截）。
+> **项目维护说明**：本仓库由晓晓呀团队独立维护，功能、界面和版本以本仓库发布内容为准。
+
+> **维护文档**：[版本记录](docs/版本记录.md) · [构建与发布流程](docs/构建与发布流程.md)。当前已通过实机测试的稳定代码基线为 `cebba578`（QA 构建，非正式签名版）。
 
 ## ✨ 为什么值得一试
 
@@ -103,11 +105,11 @@
 
 **方式一：装现成 APK**
 
-到 [Releases](https://github.com/ktv668899/maidong-ktv/releases)（或 [Gitee Releases](https://gitee.com/weishilong/maidong-ktv/releases)）下载最新 `.apk`，U 盘拷到电视安装，或用 adb：
+到 [Releases](https://github.com/redhatlxg/xiaoxiao-ktv/releases) 下载最新 `.apk`，U 盘拷到电视安装，或用 adb：
 
 ```bash
 adb connect 192.168.1.x:5555            # 电视需先开启「网络调试」
-adb install -r maidong-ktv-release.apk
+adb install -r xiaoxiao-ktv-release.apk
 ```
 
 **方式二：自己编译源码** —— 见下一节。
@@ -121,7 +123,7 @@ adb install -r maidong-ktv-release.apk
 | 项目 | 要求 |
 |---|---|
 | JDK | OpenJDK **17** |
-| Android SDK | `compileSdk 35` · `minSdk 21` · `targetSdk 25` |
+| Android SDK | `compileSdk 35` · `minSdk 19` · `targetSdk 25` |
 | Gradle | 使用仓库自带 wrapper（**8.13**），无需单独安装 |
 | 系统 | Linux / macOS / Windows 命令行均可 |
 
@@ -134,22 +136,24 @@ sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
 ### 配置签名
 
-`app/build.gradle` 默认读取**仓库上一级目录**的密钥文件：
-
-```groovy
-storeFile file("../../ktv_keystore.jks")
-storePassword "123456"
-keyAlias "ktv"
-keyPassword "123456"
-```
-
-没有密钥就自己生成一份，或临时把 `signingConfigs.release` 换成 `signingConfigs.debug`：
+Release 签名信息通过环境变量注入，**不要把密钥文件、密码或真实签名信息提交到 Git 仓库**。在构建环境中设置以下变量：
 
 ```bash
-keytool -genkeypair -v -keystore ../ktv_keystore.jks \
+export KTV_STORE_FILE="/absolute/path/ktv_keystore.jks"
+export KTV_STORE_PASSWORD="你的密钥库密码"
+export KTV_KEY_ALIAS="你的别名"
+export KTV_KEY_PASSWORD="你的密钥密码"
+```
+
+Windows PowerShell 可使用 `$env:KTV_STORE_FILE = "C:\\path\\ktv_keystore.jks"` 等方式设置。未配置这四项时，Release 仍可构建为未签名 APK；正式安装分发前必须使用自己的密钥签名。
+
+生成新密钥时请自行妥善保存密码和备份文件：
+
+```bash
+keytool -genkeypair -v -keystore ktv_keystore.jks \
   -alias ktv -keyalg RSA -keysize 2048 -validity 10000 \
   -storepass 123456 -keypass 123456 \
-  -dname "CN=Maidong KTV, OU=Dev, O=Maidong, L=Beijing, ST=Beijing, C=CN"
+  -dname "CN=XiaoxiaoYa KTV, OU=Software, O=XiaoxiaoYa, C=CN"
 ```
 
 ### 编译与安装
@@ -165,7 +169,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 ## 📁 目录结构
 
 ```
-maidong-ktv/
+xiaoxiao-ktv/
 ├── app/
 │   ├── src/main/java/com/local/ktv/
 │   │   ├── MainActivity.kt            # 主界面 / 播放 / 下载编排
@@ -192,20 +196,17 @@ maidong-ktv/
 | 安装报 `NO_MATCHING_ABIS` | 用的是裁剪过 ABI 的包；本项目已同时打包 v7a 与 arm64 |
 | 想改签名 / 精简 ABI | 编辑 `app/build.gradle` 的 `signingConfigs` 与 `ndk.abiFilters` 后重编 |
 
-## 📜 许可与声明
+## 📜 软件许可与版权声明
 
-本项目**完全免费、公开源码**，仅供个人学习与技术交流。完整条款见 [LICENSE](./LICENSE)，要点：
+晓晓呀 KTV 的软件使用、复制、分发及商业授权，以软件发布方另行提供的许可协议或书面授权为准。未经许可，不得擅自复制、修改、再分发或用于未获授权的商业场景。
 
-- **禁止任何形式的营利性使用**：不得打包售卖、硬件预装、收费技术支持，或以本软件承接商业 KTV 运营。
-- **二次分发须保留本协议与原作者信息**，衍生版本同样必须免费、开源、禁止商用。
-- **如果您是付费买到的本软件，说明您被骗了**，请立即向平台举报并申请退款。
-- 本项目基于上游「[麦动 KTV](https://gitee.com/yangyachao-X/maidong-ktv)」的界面与功能框架改造，内核与数据源部分重写；上游框架版权归原作者所有。
-- 歌曲、MV 及曲库内容版权归各版权方所有，请遵守所在地区法律法规。
+歌曲、MV、伴奏、歌词及曲库数据可能涉及独立的第三方版权。获得软件使用或商业授权，不代表自动获得音乐内容的播放、传播、点播或商业经营权；使用者须自行确认并取得所需授权。
+
+本项目包含的第三方开源组件仍受其各自许可证约束，相关版权声明和许可证要求不会因本项目品牌调整而取消。
 
 ## 🙏 致谢
 
-- 上游框架作者 [yangyachao-X](https://gitee.com/yangyachao-X) 提供的界面与交互基础
-- [IJKPlayer](https://github.com/bilibili/ijkplayer) 提供的播放内核
+- [IJKPlayer](https://github.com/bilibili/ijkplayer) 播放内核
 - 所有提交 Issue、反馈机型兼容问题的使用者
 
 <p align="center"><sub>如果这个项目帮你在客厅唱上了歌，欢迎点个 ⭐ Star</sub></p>

@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#e9edf0">
-  <title>晓晓呀 · 手机点歌</title>
+  <meta name="theme-color" content="#10141c">
+  <title>晓晓呀 KTV · 手机点歌</title>
   <link rel="stylesheet" href="/mobile/app.css">
   <link rel="stylesheet" href="/mobile/logo.css">
 </head>
@@ -14,8 +14,8 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-mark"><img src="/res/drawable-nodpi/ktv_logo.png" alt="晓晓呀"></div>
-        <div><h1>晓晓呀</h1><p id="connection"><span></span>正在连接晓晓呀…</p></div>
+        <div class="brand-mark"><img src="/res/drawable-nodpi/ktv_brand_icon.webp" alt="晓晓呀"></div>
+        <div><h1>晓晓呀 KTV</h1><p id="connection"><span></span>正在连接晓晓呀 KTV…</p></div>
       </div>
       <button id="queueBadge" class="queue-badge" data-page="queue"><b>0</b><span>已点歌曲</span></button>
     </header>
@@ -86,6 +86,11 @@
           </div>
         </div>
         <div id="searchResultBlock" class="search-result-block hidden">
+          <div id="singerDetailToolbar" class="singer-detail-toolbar hidden">
+            <button type="button" id="singerBack" class="singer-back">← 返回歌手列表</button>
+            <div class="singer-detail-title"><small>歌手专属曲库</small><strong id="singerDetailName"></strong></div>
+            <span id="singerDetailMeta">正在加载歌曲…</span>
+          </div>
           <div class="block-title"><h3 id="resultTitle">歌手搜索结果</h3><span id="resultSummary"></span></div>
           <div id="results" class="list"></div><button id="more" class="more hidden">加载更多歌曲</button>
         </div>
@@ -107,7 +112,7 @@
       </section>
     </main>
 
-    <nav aria-label="点歌导航"><button data-page="search" class="active"><i class="nav-search"></i><span>点歌</span></button><button data-page="singers"><i class="nav-singer"></i><span>歌手</span></button><button data-page="ranking"><i class="nav-ranking"></i><span>排行</span></button><button data-page="favorites"><i class="nav-favorite">★</i><span>收藏</span></button><button data-page="queue"><i class="nav-queue"></i><span>已点</span><b id="navCount" class="hidden">0</b></button><button data-page="remote"><i class="nav-remote"></i><span>遥控</span></button></nav>
+    <nav aria-label="点歌导航"><button data-page="search" class="active" aria-current="page"><i class="nav-search"></i><span>点歌</span></button><button data-page="singers"><i class="nav-singer"></i><span>歌手</span></button><button data-page="ranking"><i class="nav-ranking"></i><span>排行</span></button><button data-page="favorites"><i class="nav-favorite">★</i><span>收藏</span></button><button data-page="queue"><i class="nav-queue"></i><span>已点</span><b id="navCount" class="hidden">0</b></button><button data-page="remote"><i class="nav-remote"></i><span>遥控</span></button></nav>
   </div>
   <div id="toast"></div>
   <script src="/mobile/app.js"></script>

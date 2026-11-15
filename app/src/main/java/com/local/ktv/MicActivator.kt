@@ -1,5 +1,9 @@
 package com.local.ktv
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -22,7 +26,7 @@ import android.util.Log
  * 因此对外暴露 [restart] 供设备变化监听调用; [setPreferredInput] 支持 Android 8.0+
  * 的 AudioRecord.setPreferredDevice 直接把输入锁定到指定麦克风(优先外接)。
  */
-class MicActivator {
+class MicActivator(private val context: Context) {
     private val tag = "MicActivator"
     private var record: AudioRecord? = null
     private var thread: Thread? = null
@@ -38,6 +42,12 @@ class MicActivator {
     @Synchronized
     fun start() {
         if (running) return
+        if (android.os.Build.VERSION.SDK_INT >= 23 &&
+            context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(tag, "RECORD_AUDIO permission is not granted; microphone activation skipped")
+            return
+        }
         running = true
         paused = false
         spawnThread()
@@ -94,6 +104,9 @@ class MicActivator {
         thread = null
     }
 
+    // Permission is checked in start(); it may still be revoked while the worker is running.
+    // Keep the API calls guarded by SecurityException handling below.
+    @SuppressLint("MissingPermission")
     private fun readLoop() {
         var consecutiveFails = 0
         while (running && !paused) {
@@ -139,6 +152,9 @@ class MicActivator {
                         consecutiveFails = 0
                     }
                 }
+            } catch (e: SecurityException) {
+                Log.w(tag, "microphone permission was revoked; stopping keep-alive", e)
+                running = false
             } catch (e: Throwable) {
                 Log.w(tag, "mic keep-alive error: ${e.message}")
                 sleepQuietly(5000)

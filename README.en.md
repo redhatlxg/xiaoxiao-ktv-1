@@ -39,7 +39,7 @@
 - Segmented database download, verification, merge, and atomic update.
 - Directory creation, database scanning, and download startup only after storage permission is granted.
 - Local disk and USB song scanning, reserved storage settings, and automatic cleanup.
-- Unified Maidong KTV data storage to avoid conflicts with other applications.
+- Unified app data storage to avoid conflicts with other applications.
 
 ## Settings
 
@@ -55,27 +55,15 @@
 - Consistent state and meaning across top, windowed, and full-screen playback controls.
 - Stable focus during list refreshes, paging, tab changes, and song ordering.
 - Focus changes color only and preserves each control's original dimensions, corners, and layout.
-- A consistent circular Maidong logo across the home screen, player, and application information.
+- A consistent circular Xiao Xiao Ya logo across the home screen, player, and application information.
 
-## Project Notice
+## Project Information
 
-> **This repository (primary)**: [http://ck.ac19.cn:6699/admin/maidong-ktv](http://ck.ac19.cn:6699/admin/maidong-ktv)
->
-> **Open-source mirror (Gitee)**: [https://gitee.com/weishilong/maidong-ktv](https://gitee.com/weishilong/maidong-ktv)
->
-> **UI/feature framework credit**: [https://gitee.com/yangyachao-X/maidong-ktv](https://gitee.com/yangyachao-X/maidong-ktv)
->
-> This repository reworks the upstream "Maidong KTV" UI and feature framework, and the core/data layer was
-> rewritten with **DSH (DeepSeek Harness)**: library sync, song-source integration, device auth,
-> risk-control handling, remote logging, and ad blocking are all new implementations.
+This repository is maintained as **Xiao Xiao Ya KTV**. Product features, interface changes, and release information are maintained in this repository.
 
-Highlights of the reworked data layer:
+Software distribution and commercial use are governed by the license or written authorization supplied with the specific release. Third-party open-source components remain subject to their own licenses.
 
-- **Library**: synced exclusively from the official Muse service
-  (`mconn.cherryonline.cn` `mls-api/v1/sqlite/sync`); the code host carries source only, no database files.
-- **Song source**: `w.w345.my` (`i.php` token → `do.php` playback URL) with fixed device identity and
-  reproduced signing; ad/mismatched resources (e.g. `wb66.cn/.../719.ts`) are blocked and retried.
-- **JS hot-update**: `app/src/main/assets/mobile/ktv_api.js`, requires the `KTV_BRIDGE_API: 7` marker.
+Song, MV, accompaniment, lyric, and catalog-data rights are separate from software rights. Users and operators must obtain any permissions required for their intended use.
 
 ## Building
 
@@ -83,7 +71,7 @@ Requirements: JDK 17, Android SDK (`compileSdk 35`, `minSdk 21`, `targetSdk 25`)
 Gradle wrapper 8.13 (bundled).
 
 ```bash
-cd maidong-ktv
+cd xiaoxiao-ktv
 export JAVA_HOME=/path/to/jdk-17
 export ANDROID_HOME=/path/to/android-sdk
 export ANDROID_SDK_ROOT=$ANDROID_HOME
@@ -95,5 +83,5 @@ repo root) with alias `ktv` / password `123456`; adjust paths or use `signingCon
 quick unsigned build. Output: `app/build/outputs/apk/release/app-release.apk`
 (dual ABI: `armeabi-v7a` + `arm64-v8a`). Install with `adb install -r <apk>`.
 
-For non-commercial learning purposes only. Respect upstream copyright and song licensing.
+Software use, distribution, and any commercial authorization are subject to the applicable written agreement or authorization from the rights holder. Music, lyrics, accompaniment, MV, and catalog data may be subject to separate third-party rights. Open-source components remain subject to their respective licenses.
 

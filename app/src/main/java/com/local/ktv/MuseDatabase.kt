@@ -264,18 +264,28 @@ class MuseDatabase @JvmOverloads constructor(initialSourceFile: File? = null) {
         return count(sql.toString(), args.toTypedArray())
     }
 
-    fun songsBySinger(singerId: String, offset: Int, limit: Int): MutableList<Song> = songs(
-        "$SONG_SELECT INNER JOIN song_singer_relations ssr ON s.id=ssr.song_id " +
-            "WHERE ssr.singer_id=? AND s.deleted_at IS NULL " +
-            "$RECOMMEND_ORDER LIMIT ? OFFSET ?",
-        arrayOf(singerId, limit.toString(), offset.toString()),
-    )
+    fun songsBySinger(singerId: String, offset: Int, limit: Int): MutableList<Song> {
+        val args = mutableListOf<String>()
+        val match = songSingerMatchCondition(singerId = singerId, singerName = null, args = args)
+        args += limit.toString()
+        args += offset.toString()
+        return songs(
+            "$SONG_SELECT WHERE s.deleted_at IS NULL AND $match " +
+                "$RECOMMEND_ORDER LIMIT ? OFFSET ?",
+            args.toTypedArray(),
+        )
+    }
 
-    fun countSongsBySinger(singerId: String): Int = count(
-        "SELECT COUNT(*) FROM song_singer_relations ssr INNER JOIN songs s ON s.id=ssr.song_id " +
-            "WHERE ssr.singer_id=? AND s.deleted_at IS NULL",
+    fun countSongsBySinger(singerId: String): Int {
+        val args = mutableListOf<String>()
+        val match = songSingerMatchCondition(singerId = singerId, singerName = null, args = args)
+        return count("SELECT COUNT(*) FROM songs s WHERE s.deleted_at IS NULL AND $match", args.toTypedArray())
+    }
+
+    fun singerNameById(singerId: String): String? = rows(
+        "SELECT name FROM singers WHERE id=? AND deleted_at IS NULL LIMIT 1",
         arrayOf(singerId),
-    )
+    ) { it.getString(0) }.firstOrNull()
 
     fun searchSongsBySinger(
         singerId: String,
@@ -310,24 +320,87 @@ class MuseDatabase @JvmOverloads constructor(initialSourceFile: File? = null) {
     }
 
     fun songsBySingerName(singerName: String, offset: Int, limit: Int): MutableList<Song> {
-        val pattern = "%$singerName%"
+        val args = mutableListOf<String>()
+        val match = songSingerMatchCondition(singerId = null, singerName = singerName, args = args)
+        args += limit.toString()
+        args += offset.toString()
         return songs(
-            "$SONG_SELECT WHERE s.deleted_at IS NULL " +
-                "AND s.id IN (SELECT ssr.song_id FROM song_singer_relations ssr " +
-                "INNER JOIN singers sg ON ssr.singer_id=sg.id WHERE sg.name LIKE ?) " +
+            "$SONG_SELECT WHERE s.deleted_at IS NULL AND $match " +
                 "$RECOMMEND_ORDER LIMIT ? OFFSET ?",
-            arrayOf(pattern, limit.toString(), offset.toString()),
-        )
+            args.toTypedArray(),
+        ).onEach { song ->
+            if (song.singer.isNullOrBlank() || song.singer == "未知歌手") song.singer = singerName
+        }
     }
 
     fun countSongsBySingerName(singerName: String): Int {
-        val pattern = "%$singerName%"
-        return count(
-            "SELECT COUNT(*) FROM songs s WHERE s.deleted_at IS NULL " +
-                "AND s.id IN (SELECT ssr.song_id FROM song_singer_relations ssr " +
-                "INNER JOIN singers sg ON ssr.singer_id=sg.id WHERE sg.name LIKE ?)",
-            arrayOf(pattern),
-        )
+        val args = mutableListOf<String>()
+        val match = songSingerMatchCondition(singerId = null, singerName = singerName, args = args)
+        return count("SELECT COUNT(*) FROM songs s WHERE s.deleted_at IS NULL AND $match", args.toTypedArray())
+    }
+
+    /**
+     * Some Muse catalogs expose the singer relationship only through the relation table;
+     * other catalog revisions also denormalize singer ids/names onto songs. Use both.
+     * Column names come from SQLite schema metadata and are quoted only after validation.
+     */
+    private fun songSingerMatchCondition(
+        singerId: String?,
+        singerName: String?,
+        args: MutableList<String>,
+    ): String {
+        val columns = rows("PRAGMA table_info(songs)") { it.getString(1) }
+            .filter { it.matches(Regex("[A-Za-z_][A-Za-z0-9_]*")) }
+        // Some Muse releases omit the normalized singer relation table and store
+        // singer identifiers/names directly on songs. Only build JOIN clauses when
+        // the required tables and columns actually exist, or SQLite rejects fallback.
+        val relationColumns = rows("PRAGMA table_info(song_singer_relations)") {
+            it.getString(1).lowercase(Locale.ROOT)
+        }.toSet()
+        val singerColumns = rows("PRAGMA table_info(singers)") {
+            it.getString(1).lowercase(Locale.ROOT)
+        }.toSet()
+        val hasSingerRelations = relationColumns.containsAll(setOf("song_id", "singer_id"))
+        val hasSingerTable = singerColumns.containsAll(setOf("id", "name"))
+        val idColumns = columns.filter { name ->
+            val lower = name.lowercase(Locale.ROOT)
+            (lower.contains("singer") || lower.contains("artist")) && lower.contains("id")
+        }
+        val nameColumns = columns.filter { name ->
+            val lower = name.lowercase(Locale.ROOT)
+            (lower.contains("singer") || lower.contains("artist")) && !lower.contains("id")
+        }
+        val clauses = mutableListOf<String>()
+
+        singerId?.takeIf { it.isNotBlank() }?.let { id ->
+            if (hasSingerRelations) {
+                clauses += "EXISTS (SELECT 1 FROM song_singer_relations ssr " +
+                    "WHERE ssr.song_id=s.id AND ssr.singer_id=?)"
+                args += id
+            }
+            idColumns.forEach { column ->
+                val quoted = "s.$column"
+                clauses += "CAST($quoted AS TEXT)=?"
+                args += id
+                clauses += "CAST($quoted AS TEXT) LIKE ?"
+                args += "%$id%"
+            }
+        }
+
+        singerName?.trim()?.takeIf { it.isNotEmpty() }?.let { name ->
+            if (hasSingerRelations && hasSingerTable) {
+                clauses += "EXISTS (SELECT 1 FROM song_singer_relations ssr " +
+                    "INNER JOIN singers sg ON sg.id=ssr.singer_id " +
+                    "WHERE ssr.song_id=s.id AND sg.name LIKE ?)"
+                args += "%$name%"
+            }
+            nameColumns.forEach { column ->
+                val quoted = "s.$column"
+                clauses += "CAST($quoted AS TEXT) LIKE ?"
+                args += "%$name%"
+            }
+        }
+        return clauses.joinToString(" OR ", prefix = "(", postfix = ")").ifEmpty { "0" }
     }
 
     fun playlists(offset: Int, limit: Int): MutableList<Array<String?>> = rows(
@@ -338,10 +411,15 @@ class MuseDatabase @JvmOverloads constructor(initialSourceFile: File? = null) {
         arrayOf(cursor.getString(0), cursor.getString(1), cursor.getInt(2).toString(), cursor.getLong(3).toString())
     }
 
+    /**
+     * 排行榜入口：优先返回曲库明确标记的排行榜(type=2)，并补充曲库中以「抖音/短视频」命名的主题榜单。
+     * 补充项仍使用真实 playlist ID 查询歌曲，不伪造榜单数据，也不依赖外部付费接口。
+     */
     fun rankPlaylists(): MutableList<Array<String?>> = rows(
         "SELECT id, name, rank_type, song_count FROM playlists " +
-            "WHERE deleted_at IS NULL AND type=2 " +
-            "ORDER BY CASE WHEN rank_type IS NULL THEN 1 ELSE 0 END, rank_type ASC, rec_score DESC",
+            "WHERE deleted_at IS NULL AND (type=2 OR name LIKE '%抖音%' OR name LIKE '%短视频%') " +
+            "ORDER BY CASE WHEN type=2 THEN 0 ELSE 1 END, " +
+            "CASE WHEN rank_type IS NULL THEN 1 ELSE 0 END, rank_type ASC, rec_score DESC, hot_score DESC",
     ) { cursor ->
         arrayOf(cursor.getString(0), cursor.getString(1), cursor.getInt(2).toString(), cursor.getInt(3).toString())
     }

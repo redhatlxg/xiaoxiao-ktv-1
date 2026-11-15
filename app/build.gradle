@@ -8,11 +8,18 @@ android {
     compileSdk 35
 
     defaultConfig {
+        def licensePublicKey = (System.getenv("KTV_LICENSE_PUBLIC_KEY_B64") ?: "").trim()
+        if (!licensePublicKey) {
+            def publicKeyFile = rootProject.file("config/license-public-key.b64")
+            if (publicKeyFile.isFile()) licensePublicKey = publicKeyFile.getText("UTF-8").trim()
+        }
+        buildConfigField "String", "KTV_LICENSE_PUBLIC_KEY_B64", '"' + licensePublicKey + '"'
+
         applicationId "com.local.ktv"
         minSdk 19
         targetSdk 25
-        versionCode 46
-        versionName "1.6.2"
+        versionCode 52
+        versionName "1.6.8"
         ndk {
             // 双 ABI 打包:兼容 64 位(Exynos 1580 等 arm64-v8a)与 32 位设备(极米 Play 超越版
             // 的 Amlogic 950X2/S905X2 采用 32 位 Android 用户态,必须包含 armeabi-v7a,否则
@@ -39,13 +46,25 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
-    // 签名配置:使用已有的 ktv_keystore.jks
+    // Release 签名只从环境变量读取，仓库中不保存密钥路径或密码。
+    // 未配置签名时仍可构建未签名 APK；正式分发前请注入以下四个变量：
+    // KTV_STORE_FILE / KTV_STORE_PASSWORD / KTV_KEY_ALIAS / KTV_KEY_PASSWORD
+    def releaseSigning = [
+        storeFile: System.getenv("KTV_STORE_FILE"),
+        storePassword: System.getenv("KTV_STORE_PASSWORD"),
+        keyAlias: System.getenv("KTV_KEY_ALIAS"),
+        keyPassword: System.getenv("KTV_KEY_PASSWORD")
+    ]
+    def hasReleaseSigning = releaseSigning.values().every { it != null && !it.trim().isEmpty() }
+
     signingConfigs {
-        release {
-            storeFile file("../../ktv_keystore.jks")
-            storePassword "123456"
-            keyAlias "ktv"
-            keyPassword "123456"
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseSigning.storeFile)
+                storePassword releaseSigning.storePassword
+                keyAlias releaseSigning.keyAlias
+                keyPassword releaseSigning.keyPassword
+            }
         }
     }
 
@@ -53,7 +72,7 @@ android {
         release {
             minifyEnabled true
             shrinkResources true
-            signingConfig signingConfigs.release
+            if (hasReleaseSigning) signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
         debug {

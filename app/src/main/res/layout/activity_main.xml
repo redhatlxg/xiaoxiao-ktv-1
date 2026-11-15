@@ -1,23 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  KTV 点歌系统主界面布局
-  参考原版 KTV 设计:
-    - 顶部:logo + 搜索 + 播放控制按钮(已点/伴唱/切歌/暂停/重唱/调音/正在加载)
-    - 主体:左列(视频窗口)、中列(4个分类卡片)、右列(新歌榜海报)
-    - 底部:猜你想唱 + 设置 + 退出
-    - 通用外壳:左列(视频+键盘)/ 右列(内容区 + 面包屑 + Tab + 列表)
+  晓晓呀 KTV 主界面布局基线
+  以商业 KTV 点歌台的固定操作区为准:
+    - 顶部:品牌、搜索、已点数量、原伴唱、切歌、暂停、重唱、调音
+    - 首页:左侧播放窗口与常用入口 / 中部点歌分类 / 右侧歌手专区
+    - 子页面:左侧播放窗口与拼音键盘 / 右侧分类导航、内容列表与分页
+    - 底部:猜你想唱、手机扫码点歌、设置、退出
+  所有页面沿用统一的深色底板、酒红选中态与香槟金强调色。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/layout_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/bg_app">
+    android:background="@drawable/bg_main_purple">
 
     <!-- ============== 顶部状态栏 ============== -->
     <LinearLayout
         android:id="@+id/top_bar"
         android:layout_width="match_parent"
-        android:layout_height="64dp"
+        android:layout_height="68dp"
         android:layout_gravity="top"
         android:orientation="horizontal"
         android:gravity="center_vertical"
@@ -28,11 +29,11 @@
         <!-- 左侧 logo -->
         <ImageView
             android:id="@+id/text_logo"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:contentDescription="晓晓呀"
+            android:layout_width="184dp"
+            android:layout_height="56dp"
+            android:contentDescription="晓晓呀 KTV"
             android:scaleType="fitCenter"
-            android:src="@drawable/ktv_logo" />
+            android:src="@drawable/ktv_brand_horizontal" />
 
         <TextView
             android:id="@+id/top_brand_name"
@@ -40,7 +41,7 @@
             android:layout_height="44dp"
             android:layout_marginStart="8dp"
             android:gravity="center_vertical"
-            android:text="晓晓呀"
+            android:text="晓晓呀 KTV"
             android:textColor="#FFFFFFFF"
             android:textSize="22sp"
             android:textStyle="bold" />
@@ -49,8 +50,8 @@
         <TextView
             android:id="@+id/btn_top_search"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
-            android:layout_marginStart="10dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="12dp"
             android:background="@drawable/bg_btn_top_search"
             android:gravity="center_vertical"
             android:paddingStart="12dp"
@@ -70,7 +71,7 @@
         <LinearLayout
             android:id="@+id/btn_top_order"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
+            android:layout_height="36dp"
             android:background="@drawable/bg_btn_top_action"
             android:gravity="center_vertical"
             android:orientation="horizontal"
@@ -103,8 +104,8 @@
         <TextView
             android:id="@+id/btn_top_vocal"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
-            android:layout_marginStart="6dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="7dp"
             android:background="@drawable/bg_btn_top_action"
             android:gravity="center_vertical"
             android:paddingStart="10dp"
@@ -118,7 +119,7 @@
         <TextView
             android:id="@+id/btn_top_next"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
+            android:layout_height="36dp"
             android:layout_marginStart="6dp"
             android:background="@drawable/bg_btn_top_action"
             android:gravity="center_vertical"
@@ -133,7 +134,7 @@
         <TextView
             android:id="@+id/btn_top_pause"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
+            android:layout_height="36dp"
             android:layout_marginStart="6dp"
             android:background="@drawable/bg_btn_top_action"
             android:gravity="center_vertical"
@@ -148,7 +149,7 @@
         <TextView
             android:id="@+id/btn_top_replay"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
+            android:layout_height="36dp"
             android:layout_marginStart="6dp"
             android:background="@drawable/bg_btn_top_action"
             android:gravity="center_vertical"
@@ -163,7 +164,7 @@
         <TextView
             android:id="@+id/btn_top_tone"
             android:layout_width="wrap_content"
-            android:layout_height="32dp"
+            android:layout_height="36dp"
             android:layout_marginStart="6dp"
             android:background="@drawable/bg_btn_top_action"
             android:gravity="center_vertical"
@@ -177,8 +178,8 @@
 
         <ImageView
             android:layout_width="30dp"
-            android:layout_height="32dp"
-            android:layout_marginStart="6dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="8dp"
             android:contentDescription="WiFi"
             android:padding="6dp"
             android:scaleType="centerInside"
@@ -189,7 +190,7 @@
     <LinearLayout
         android:id="@+id/bottom_bar"
         android:layout_width="match_parent"
-        android:layout_height="64dp"
+        android:layout_height="68dp"
         android:layout_gravity="bottom"
         android:orientation="horizontal"
         android:gravity="center_vertical"
@@ -261,8 +262,8 @@
         android:id="@+id/content_frame"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginTop="64dp"
-        android:layout_marginBottom="64dp">
+        android:layout_marginTop="68dp"
+        android:layout_marginBottom="68dp">
 
         <!-- ============== 通用外壳(子页面): 左列视频+键盘 / 右列内容 ============== -->
         <LinearLayout
@@ -270,19 +271,20 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="horizontal"
-            android:paddingStart="45dp"
-            android:paddingTop="39dp"
-            android:paddingEnd="45dp"
-            android:paddingBottom="31dp"
+            android:paddingStart="24dp"
+            android:paddingTop="14dp"
+            android:paddingEnd="24dp"
+            android:paddingBottom="14dp"
             android:visibility="gone">
 
             <!-- ===== 左列: 播放器 + 键盘 ===== -->
             <LinearLayout
                 android:id="@+id/left_column"
-                android:layout_width="370dp"
+                android:layout_width="0dp"
                 android:layout_height="match_parent"
+                android:layout_weight="1.00"
                 android:orientation="vertical"
-                android:layout_marginEnd="20dp">
+                android:layout_marginEnd="16dp">
 
                 <!-- 顶部提示: 当前 / 下一首 -->
                 <LinearLayout
@@ -305,7 +307,7 @@
                         android:singleLine="true"
                         android:ellipsize="end"
                         android:text="当前: 未知  下首: 未知"
-                        android:textColor="#FFE0E0FF"
+                        android:textColor="#FFF4F2ED"
                         android:textSize="12sp" />
                 </LinearLayout>
 
@@ -313,7 +315,8 @@
                 <FrameLayout
                     android:id="@+id/player_container"
                     android:layout_width="match_parent"
-                    android:layout_height="210dp"
+                    android:layout_height="0dp"
+                    android:layout_weight="1.05"
                     android:background="@drawable/bg_player_window"
                     android:foreground="@drawable/bg_player_focus"
                     android:foregroundGravity="fill"
@@ -332,7 +335,7 @@
                         android:layout_gravity="bottom"
                         android:orientation="vertical"
                         android:padding="10dp"
-                        android:background="#CC0D0A1A"
+                        android:background="#CC090D13"
                         android:visibility="gone">
 
                         <TextView
@@ -340,7 +343,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="未播放"
-                            android:textColor="#FFE363"
+                            android:textColor="#FFE7BD70"
                             android:textSize="16sp"
                             android:textStyle="bold" />
 
@@ -362,7 +365,7 @@
                         android:layout_gravity="center"
                         android:orientation="vertical"
                         android:padding="16dp"
-                        android:background="#DD1A1030"
+                        android:background="#DD11151D"
                         android:visibility="gone">
 
                         <TextView
@@ -371,7 +374,7 @@
                             android:layout_height="wrap_content"
                             android:layout_gravity="center"
                             android:text="下载中..."
-                            android:textColor="#FF27CCA4"
+                            android:textColor="#FFEB4C5E"
                             android:textSize="14sp" />
 
                         <ProgressBar
@@ -399,15 +402,16 @@
                     android:id="@+id/keyboard_area"
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
-                    android:layout_weight="0.50"
+                    android:layout_weight="0.95"
                     android:orientation="vertical"
                     android:background="@drawable/bg_keyboard_area"
                     android:padding="8dp">
 
                     <!-- 搜索输入框 -->
                     <LinearLayout
+                        android:id="@+id/search_input_row"
                         android:layout_width="match_parent"
-                        android:layout_height="32dp"
+                        android:layout_height="38dp"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
                         android:layout_marginStart="8dp"
@@ -425,7 +429,9 @@
                             android:textColor="#FFF"
                             android:textColorHint="#80FFFFFF"
                             android:textSize="13sp"
-                            android:hint="输入歌名、歌手或拼音"
+                            android:hint="输入首字母搜索"
+                            android:drawableStart="@drawable/ott_ic_search"
+                            android:drawablePadding="8dp"
                             android:inputType="text"
                             android:imeOptions="actionSearch"
                             android:singleLine="true" />
@@ -438,7 +444,7 @@
 
                         <TextView
                             android:id="@+id/key_backspace"
-                            android:layout_width="40dp"
+                            android:layout_width="44dp"
                             android:layout_height="match_parent"
                             android:gravity="center"
                             android:text="←"
@@ -447,7 +453,7 @@
 
                         <TextView
                             android:id="@+id/key_clear"
-                            android:layout_width="32dp"
+                            android:layout_width="38dp"
                             android:layout_height="match_parent"
                             android:gravity="center"
                             android:text="×"
@@ -464,6 +470,7 @@
                         android:gravity="center_vertical">
 
                         <LinearLayout
+                            android:id="@+id/keyboard_mode_column"
                             android:layout_width="80dp"
                             android:layout_height="match_parent"
                             android:orientation="vertical"
@@ -472,21 +479,21 @@
                         <TextView
                             android:id="@+id/key_abc"
                             android:layout_width="72dp"
-                            android:layout_height="30dp"
+                            android:layout_height="34dp"
                             android:gravity="center"
                             android:background="@drawable/bg_key_mode"
                             android:text="ABC"
-                            android:textColor="#FF27CCA4"
+                            android:textColor="#FFEB4C5E"
                             android:textSize="14sp" />
 
                         <TextView
                             android:id="@+id/key_123"
                             android:layout_width="72dp"
-                            android:layout_height="30dp"
+                            android:layout_height="34dp"
                             android:layout_marginTop="8dp"
                             android:gravity="center"
                             android:background="@drawable/bg_key_mode_dim"
-                            android:text="数字"
+                            android:text="手写"
                             android:textColor="#99FFFFFF"
                             android:textSize="14sp" />
 
@@ -511,16 +518,87 @@
                     </LinearLayout>
                 </LinearLayout>
 
-                <GridLayout
-                    android:id="@+id/rank_category_grid"
+                <LinearLayout
+                    android:id="@+id/rank_spotlight_card"
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
-                    android:layout_weight="0.50"
-                    android:alignmentMode="alignMargins"
-                    android:columnCount="3"
-                    android:rowCount="3"
-                    android:paddingTop="10dp"
-                    android:visibility="gone" />
+                    android:layout_weight="0.95"
+                    android:orientation="vertical"
+                    android:gravity="center_vertical"
+                    android:paddingStart="20dp"
+                    android:paddingTop="16dp"
+                    android:paddingEnd="20dp"
+                    android:paddingBottom="16dp"
+                    android:background="@drawable/bg_rank_spotlight"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/rank_spotlight_label"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:text="热歌榜 · TOP 1 推荐"
+                        android:textColor="#FFE2B2"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:id="@+id/rank_spotlight_icon"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:layout_marginEnd="16dp"
+                            android:contentDescription="当前榜单图标"
+                            android:scaleType="fitCenter" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center_vertical"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/rank_spotlight_song"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:maxLines="2"
+                                android:ellipsize="end"
+                                android:text="正在加载热门歌曲"
+                                android:textColor="#FFFFFFFF"
+                                android:textSize="20sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/rank_spotlight_singer"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="7dp"
+                                android:maxLines="1"
+                                android:ellipsize="end"
+                                android:text="从右侧选择榜单，查看最新曲目"
+                                android:textColor="#FFB6C0CC"
+                                android:textSize="13sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:text="精选榜单 · 热门歌曲实时更新"
+                        android:textColor="#FF8F9BA9"
+                        android:textSize="11sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- ===== 右列: 主内容区 ===== -->
@@ -528,7 +606,7 @@
                 android:id="@+id/right_column"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="0.58"
+                android:layout_weight="1.02"
                 android:orientation="vertical">
 
                 <View
@@ -560,7 +638,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="‹ 主页"
-                            android:textColor="#FF27CCA4"
+                            android:textColor="#FFB9B4FF"
                             android:textSize="14sp" />
 
                         <TextView
@@ -594,7 +672,7 @@
                             android:layout_width="0dp"
                             android:layout_height="0dp"
                             android:visibility="gone"
-                            android:text="麦动"
+                            android:text="晓晓呀 KTV"
                             android:textColor="#FFFFD56B"
                             android:textSize="14sp"
                             android:textStyle="bold" />
@@ -616,11 +694,85 @@
                 </LinearLayout>
 
                 <!-- 二级分类(语种)筛选 -->
+                <LinearLayout
+                    android:id="@+id/rank_page_header"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="5dp"
+                    android:layout_marginBottom="4dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/rank_page_title"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="排行榜精选"
+                            android:textColor="#FFFFE8C5"
+                            android:textSize="19sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/rank_page_subtitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:maxLines="1"
+                            android:ellipsize="end"
+                            android:text="每日热歌、新歌与飙升趋势"
+                            android:textColor="#FF9EABB9"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:paddingTop="5dp"
+                        android:paddingBottom="5dp"
+                        android:background="@drawable/bg_rank_badge"
+                        android:text="TOP  MUSIC"
+                        android:textColor="#FFFFDCA8"
+                        android:textSize="10sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <HorizontalScrollView
+                    android:id="@+id/rank_category_scroll"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginBottom="4dp"
+                    android:fillViewport="false"
+                    android:scrollbars="none"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:id="@+id/rank_category_grid"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp" />
+                </HorizontalScrollView>
+
                 <HorizontalScrollView
                     android:id="@+id/sub_category_scroll"
                     android:layout_width="match_parent"
-                    android:layout_height="28dp"
-                    android:layout_marginTop="12dp"
+                    android:layout_height="40dp"
+                    android:layout_marginTop="10dp"
+                    android:layout_marginBottom="8dp"
+                    android:background="@drawable/bg_category_strip"
                     android:scrollbars="none"
                     android:visibility="gone">
 
@@ -646,7 +798,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="0dp"
                         android:layout_weight="1"
-                        android:background="@drawable/bg_song_list"
+                        android:background="@android:color/transparent"
                         android:divider="#22FFFFFF"
                         android:dividerHeight="1dp"
                         android:padding="6dp"
@@ -660,11 +812,11 @@
                 <LinearLayout
                     android:id="@+id/browse_pagination"
                     android:layout_width="match_parent"
-                    android:layout_height="30dp"
+                    android:layout_height="38dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:paddingStart="6dp"
-                    android:paddingEnd="6dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
                     android:background="@drawable/bg_bottom_navigation"
                     android:layout_marginTop="6dp">
 
@@ -675,13 +827,13 @@
                         android:layout_weight="1"
                         android:gravity="center"
                         android:text="1 / 1"
-                        android:textColor="#FFE0E0FF"
+                        android:textColor="#FFF4F2ED"
                         android:textSize="13sp" />
 
                     <TextView
                         android:id="@+id/btn_prev_page"
-                        android:layout_width="76dp"
-                        android:layout_height="30dp"
+                        android:layout_width="88dp"
+                        android:layout_height="34dp"
                         android:gravity="center"
                         android:background="@drawable/bg_btn_pager"
                         android:text="上一页"
@@ -691,8 +843,8 @@
 
                     <TextView
                         android:id="@+id/btn_next_page"
-                        android:layout_width="76dp"
-                        android:layout_height="30dp"
+                        android:layout_width="88dp"
+                        android:layout_height="34dp"
                         android:gravity="center"
                         android:background="@drawable/bg_btn_pager"
                         android:text="下一页"
@@ -702,336 +854,247 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- ============== 首页: 左侧播放器+快捷卡 / 中部分类 / 右侧海报 ============== -->
+        <!-- 想唱就唱风格首页：左侧快捷点歌、中间 MV、右侧海报、底部常用入口 -->
         <LinearLayout
             android:id="@+id/home_layout"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:orientation="horizontal"
-            android:paddingStart="18dp"
-            android:paddingTop="8dp"
-            android:paddingEnd="18dp"
-            android:paddingBottom="8dp">
+            android:orientation="vertical"
+            android:paddingStart="22dp"
+            android:paddingTop="16dp"
+            android:paddingEnd="22dp"
+            android:paddingBottom="14dp">
 
             <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="0.58"
-                android:layout_marginEnd="12dp"
-                android:orientation="vertical">
+                android:id="@+id/home_top_content"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="0.80"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <LinearLayout
+                    android:id="@+id/home_center_column"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="0.92"
+                    android:layout_marginEnd="14dp"
+                    android:orientation="vertical">
+                    <TextView
+                        android:id="@+id/home_card_song"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:layout_marginBottom="6dp"
+                        android:background="@drawable/bg_home_tile_song"
+                        android:gravity="center_vertical|start"
+                        android:paddingStart="10dp"
+                        android:paddingTop="8dp"
+                        android:text="歌名点歌"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:focusable="true"
+                        android:clickable="true" />
+                    <TextView
+                        android:id="@+id/home_card_singer"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:layout_marginBottom="6dp"
+                        android:background="@drawable/bg_home_tile_singer"
+                        android:gravity="center_vertical|start"
+                        android:paddingStart="10dp"
+                        android:paddingTop="8dp"
+                        android:text="歌星点歌"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:focusable="true"
+                        android:clickable="true" />
+                    <TextView
+                        android:id="@+id/home_card_rank"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:layout_marginBottom="6dp"
+                        android:background="@drawable/bg_home_tile_rank"
+                        android:gravity="center_vertical|start"
+                        android:paddingStart="10dp"
+                        android:paddingTop="8dp"
+                        android:text="排行榜"
+                        android:textColor="#FFFFFFFF"
+                        android:textStyle="bold"
+                        android:textSize="18sp"
+                        android:focusable="true"
+                        android:clickable="true" />
+                    <TextView
+                        android:id="@+id/home_card_local"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_home_tile_local"
+                        android:gravity="center_vertical|start"
+                        android:paddingStart="10dp"
+                        android:paddingTop="8dp"
+                        android:text="本地"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="18sp"
+                        android:focusable="true"
+                        android:clickable="true" />
+                </LinearLayout>
 
                 <FrameLayout
                     android:id="@+id/home_player_container"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1"
-                    android:layout_marginBottom="8dp"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="3.65"
+                    android:layout_marginEnd="8dp"
                     android:background="@drawable/bg_player_window"
                     android:foreground="@drawable/bg_player_focus"
                     android:foregroundGravity="fill">
-
                     <com.local.ktv.player.KtvVideoView
                         android:id="@+id/home_video_background"
                         android:layout_width="match_parent"
                         android:layout_height="match_parent" />
-
-                    <!-- MV 左上角品牌标识，与右上角扫码点歌形成固定双入口 -->
                     <TextView
                         android:id="@+id/home_mv_live_badge"
                         android:visibility="gone"
                         android:layout_width="wrap_content"
                         android:layout_height="30dp"
                         android:layout_gravity="top|start"
-                        android:layout_marginStart="14dp"
-                        android:layout_marginTop="14dp"
+                        android:layout_margin="8dp"
                         android:background="@drawable/bg_home_mv_chip"
-                        android:drawableStart="@drawable/ott_ic_wifi"
-                        android:drawablePadding="6dp"
-                        android:gravity="center_vertical"
-                        android:paddingStart="10dp"
-                        android:paddingEnd="12dp"
                         android:text="晓晓呀 · MV"
-                        android:textColor="#FFF7F3EA"
-                        android:textSize="11sp"
-                        android:textStyle="bold" />
-
-                    <!-- MV 底部信息渐隐区：显示当前/下一首与歌手 -->
+                        android:textColor="#FFFFFFFF"
+                        android:gravity="center"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp" />
                     <LinearLayout
                         android:id="@+id/home_mv_info_panel"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_gravity="bottom"
-                        android:background="@drawable/bg_home_mv_info"
                         android:orientation="vertical"
-                        android:paddingStart="18dp"
-                        android:paddingTop="22dp"
-                        android:paddingEnd="150dp"
-                        android:paddingBottom="16dp">
-
+                        android:padding="8dp"
+                        android:background="@drawable/bg_home_mv_info">
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="正在播放"
-                            android:textColor="#FFD8B77E"
-                            android:textSize="10sp"
-                            android:textStyle="bold"
-                            android:letterSpacing="0.12" />
-
+                            android:textColor="#FFFFFFFF"
+                            android:textSize="10sp" />
                         <TextView
                             android:id="@+id/home_player_song_title"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="5dp"
-                            android:ellipsize="end"
-                            android:maxLines="1"
                             android:text="当前：未播放    下一首：无"
                             android:textColor="#FFFFFFFF"
-                            android:textSize="16sp"
-                            android:textStyle="bold"
-                            android:visibility="visible" />
-
+                            android:textSize="14sp"
+                            android:maxLines="1"
+                            android:ellipsize="end" />
                         <TextView
                             android:id="@+id/home_player_song_singer"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="3dp"
-                            android:ellipsize="end"
-                            android:maxLines="1"
-                            android:text=""
-                            android:textColor="#BFE2E8EB"
-                            android:textSize="12sp"
-                            android:visibility="visible" />
+                            android:textColor="#FFDDE7FF"
+                            android:textSize="11sp"
+                            android:maxLines="1" />
                     </LinearLayout>
+                    <!-- 扫码入口统一放在右侧独立二维码卡片，不再压在 MV 画面上。 -->
+                    <TextView
+                        android:id="@+id/home_scan_order_hint"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
                 </FrameLayout>
 
-                <LinearLayout
-                    android:id="@+id/home_bottom_cards_row"
-                    android:layout_width="match_parent"
-                    android:layout_height="56dp"
-                    android:orientation="horizontal">
-
+                <FrameLayout
+                    android:id="@+id/home_poster_container"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1.18"
+                    android:background="@drawable/home_banner_0"
+                    android:foreground="@drawable/bg_player_focus"
+                    android:foregroundGravity="fill"
+                    android:focusable="true"
+                    android:clickable="true">
                     <TextView
-                        android:id="@+id/home_card_regular"
-                        android:layout_width="0dp"
-                        android:layout_height="match_parent"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="6dp"
-                        android:background="@drawable/bg_home_card_green"
-                        android:gravity="center_vertical" android:paddingStart="14dp" android:paddingEnd="10dp" android:text="常唱" android:textColor="#FFFFFFFF" android:textSize="20sp" />
-
-                    <TextView
-                        android:id="@+id/home_card_favorite"
-                        android:layout_width="0dp"
-                        android:layout_height="match_parent"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="6dp"
-                        android:background="@drawable/bg_home_card_violet"
-                        android:gravity="center_vertical" android:paddingStart="14dp" android:paddingEnd="10dp" android:text="收藏" android:textColor="#FFFFFFFF" android:textSize="20sp" />
-
-                    <TextView
-                        android:id="@+id/home_card_category"
-                        android:layout_width="0dp"
-                        android:layout_height="match_parent"
-                        android:layout_weight="1"
-                        android:background="@drawable/bg_home_card_sky"
-                        android:gravity="center_vertical" android:paddingStart="14dp" android:paddingEnd="10dp" android:text="分类" android:textColor="#FFFFFFFF" android:textSize="20sp" />
-                </LinearLayout>
+                        android:id="@+id/text_poster_page"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="bottom|end"
+                        android:layout_margin="6dp"
+                        android:background="#99000000"
+                        android:padding="4dp"
+                        android:text="1/3"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="11sp" />
+                </FrameLayout>
             </LinearLayout>
 
             <LinearLayout
-                android:id="@+id/home_center_column"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="0.23"
-                android:orientation="vertical"
-                android:layout_marginEnd="12dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:gravity="center_vertical"
-                    android:orientation="vertical"
-                    android:paddingStart="4dp">
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="点歌大厅"
-                        android:textColor="#FFF4E7CF"
-                        android:textSize="18sp"
-                        android:textStyle="bold" />
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="热门推荐 · 歌曲检索 · 歌手专区"
-                        android:textColor="#FF8F9AA8"
-                        android:textSize="10sp" />
-                </LinearLayout>
-
+                android:id="@+id/home_bottom_cards_row"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="0.20"
+                android:layout_marginTop="14dp"
+                android:orientation="horizontal"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp">
                 <TextView
-                    android:id="@+id/home_card_rank"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
+                    android:id="@+id/home_card_category"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
                     android:layout_weight="1"
-                    android:layout_marginBottom="6dp"
-                    android:background="@drawable/bg_home_card_purple"
-                    android:gravity="center_vertical" android:paddingStart="18dp" android:paddingEnd="12dp" android:text="♫  热门排行\n人气金曲 · 新歌榜单" android:textColor="#FFFFFFFF" android:textSize="16sp" android:lineSpacingExtra="3dp" />
-
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/bg_home_tile_category"
+                    android:gravity="center_vertical|start"
+                    android:paddingStart="10dp"
+                    android:text="分类"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="15sp"
+                    android:focusable="true"
+                    android:clickable="true" />
                 <TextView
-                    android:id="@+id/home_card_song"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
+                    android:id="@+id/home_card_regular"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
                     android:layout_weight="1"
-                    android:layout_marginBottom="6dp"
-                    android:background="@drawable/bg_home_card_blue"
-                    android:gravity="center_vertical" android:paddingStart="18dp" android:paddingEnd="12dp" android:text="⌕  歌曲点歌\n歌名搜索 · 拼音快速检索" android:textColor="#FFFFFFFF" android:textSize="16sp" android:lineSpacingExtra="3dp" />
-
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/bg_home_tile_regular"
+                    android:gravity="center_vertical|start"
+                    android:paddingStart="10dp"
+                    android:text="常唱"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="15sp"
+                    android:focusable="true"
+                    android:clickable="true" />
                 <TextView
-                    android:id="@+id/home_card_singer"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
+                    android:id="@+id/home_card_favorite"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
                     android:layout_weight="1"
-                    android:layout_marginBottom="6dp"
-                    android:background="@drawable/bg_home_card_orange"
-                    android:gravity="center_vertical" android:paddingStart="18dp" android:paddingEnd="12dp" android:text="♬  歌手点歌\n按地区、歌手快速查找" android:textColor="#FFFFFFFF" android:textSize="16sp" android:lineSpacingExtra="3dp" />
-
-                <TextView
-                    android:id="@+id/home_card_local"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1"
-                    android:background="@drawable/bg_home_card_pink"
-                    android:gravity="center_vertical" android:paddingStart="18dp" android:paddingEnd="12dp" android:text="▣  本地曲库\n本机歌曲 · 收藏曲目" android:textColor="#FFFFFFFF" android:textSize="16sp" android:lineSpacingExtra="3dp" />
+                    android:background="@drawable/bg_home_tile_favorite"
+                    android:gravity="center_vertical|start"
+                    android:paddingStart="10dp"
+                    android:text="收藏"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="15sp"
+                    android:focusable="true"
+                    android:clickable="true" />
             </LinearLayout>
 
-            <FrameLayout
-                android:id="@+id/home_poster_container"
+            <LinearLayout
+                android:id="@+id/home_singer_wall"
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="0.23"
-                android:background="@drawable/bg_player_window">
-
-                <LinearLayout
-                    android:id="@+id/home_singer_wall"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:orientation="vertical"
-                    android:padding="16dp"
-                    android:background="#F00A111C">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="歌手专区"
-                        android:textColor="#FFF4E7CF"
-                        android:textSize="20sp"
-                        android:textStyle="bold"
-                        android:gravity="center_vertical"
-                        android:paddingStart="2dp" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="按地区与性别选择歌手，快速点歌"
-                        android:textColor="#FF8F9AA8"
-                        android:textSize="12sp"
-                        android:gravity="center_vertical"
-                        android:paddingStart="2dp"
-                        android:paddingBottom="14dp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="0dp"
-                        android:layout_weight="1"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/home_singer_mainland_male"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="5dp"
-                            android:gravity="center"
-                            android:background="@drawable/bg_home_card_blue"
-                            android:focusable="true"
-                            android:clickable="true"
-                            android:text="内地男歌手\n华语经典与流行"
-                            android:textColor="#FFFFFFFF"
-                            android:textSize="15sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/home_singer_mainland_female"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1"
-                            android:layout_marginStart="5dp"
-                            android:gravity="center"
-                            android:background="@drawable/bg_home_card_violet"
-                            android:focusable="true"
-                            android:clickable="true"
-                            android:text="内地女歌手\n热门女声精选"
-                            android:textColor="#FFFFFFFF"
-                            android:textSize="15sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="0dp"
-                        android:layout_weight="1"
-                        android:layout_marginTop="10dp"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/home_singer_hktw_male"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="5dp"
-                            android:gravity="center"
-                            android:background="@drawable/bg_home_card_orange"
-                            android:focusable="true"
-                            android:clickable="true"
-                            android:text="港台男歌手\n粤语与国语经典"
-                            android:textColor="#FFFFFFFF"
-                            android:textSize="15sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/home_singer_hktw_female"
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_weight="1"
-                            android:layout_marginStart="5dp"
-                            android:gravity="center"
-                            android:background="@drawable/bg_home_card_pink"
-                            android:focusable="true"
-                            android:clickable="true"
-                            android:text="港台女歌手\n经典与新歌推荐"
-                            android:textColor="#FFFFFFFF"
-                            android:textSize="15sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/text_poster_page"
-                    android:visibility="gone"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="bottom|end"
-                    android:layout_marginEnd="10dp"
-                    android:layout_marginBottom="10dp"
-                    android:background="#80000000"
-                    android:gravity="center"
-                    android:paddingStart="8dp"
-                    android:paddingEnd="8dp"
-                    android:paddingTop="2dp"
-                    android:paddingBottom="2dp"
-                    android:text=""
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="12sp" />
-            </FrameLayout>
+                android:layout_height="0dp"
+                android:visibility="gone">
+                <TextView android:id="@+id/home_singer_mainland_male" android:layout_width="1dp" android:layout_height="1dp" />
+                <TextView android:id="@+id/home_singer_mainland_female" android:layout_width="1dp" android:layout_height="1dp" />
+                <TextView android:id="@+id/home_singer_hktw_male" android:layout_width="1dp" android:layout_height="1dp" />
+                <TextView android:id="@+id/home_singer_hktw_female" android:layout_width="1dp" android:layout_height="1dp" />
+            </LinearLayout>
         </LinearLayout>
     </FrameLayout>
 
@@ -1040,7 +1103,7 @@
         android:id="@+id/mask"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#CC0D0A1A"
+        android:background="#CC090D13"
         android:visibility="gone" />
 
     <FrameLayout

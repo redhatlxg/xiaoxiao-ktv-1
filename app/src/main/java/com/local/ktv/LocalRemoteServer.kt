@@ -248,7 +248,7 @@ class LocalRemoteServer(private val context: Context) {
                     path == "/mobile/app.css" -> asset("mobile/app.css", "text/css; charset=utf-8")
                     path == "/mobile/logo.css" -> asset("mobile/logo.css", "text/css; charset=utf-8")
                     path == "/mobile/app.js" -> asset("mobile/app.js", "application/javascript; charset=utf-8")
-                    path == "/res/drawable-nodpi/ktv_logo.png" -> logoAsset()
+                    path == "/res/drawable-nodpi/ktv_brand_icon.webp" -> logoAsset()
                     path.startsWith("/api/v1/") -> callback?.handle(method, path, query, body)
                         ?: ApiResponse(503, error("NOT_READY", "服务尚未准备完成"))
                     else -> ApiResponse(404, error("NOT_FOUND", "接口不存在"))
@@ -265,9 +265,10 @@ class LocalRemoteServer(private val context: Context) {
         ApiResponse(404, error("ASSET_NOT_FOUND", "页面资源缺失"))
     }
 
+    @android.annotation.SuppressLint("ResourceType")
     private fun logoAsset(): ApiResponse = try {
-        val bytes = context.resources.openRawResource(R.drawable.ktv_logo).use { it.readBytes() }
-        ApiResponse(200, contentType = "image/png", bytes = bytes)
+        val bytes = context.resources.openRawResource(R.drawable.ktv_brand_icon).use { it.readBytes() }
+        ApiResponse(200, contentType = "image/webp", bytes = bytes)
     } catch (_: Exception) {
         ApiResponse(404, error("ASSET_NOT_FOUND", "Logo 资源缺失"))
     }

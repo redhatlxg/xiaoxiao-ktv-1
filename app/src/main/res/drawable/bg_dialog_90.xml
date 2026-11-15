@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#e6451b96" />
-    <corners android:radius="20.0dip" />
+<!-- 通用弹窗底板：深炭黑与暖金边线 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient android:angle="90" android:startColor="#F01D232D" android:endColor="#F00D1118" />
+    <corners android:radius="14dp" />
+    <stroke android:width="1dp" android:color="#55D9B879" />
 </shape>

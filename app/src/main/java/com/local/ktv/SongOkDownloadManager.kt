@@ -20,7 +20,8 @@ object SongOkDownloadManager {
     const val MIN_VALID_FILE_SIZE = SongFileValidator.MIN_VALID_FILE_SIZE
     /** 网络恢复后最多自动重试几首（防止一次拉起过多并发下载）。 */
     private const val MAX_NETWORK_RETRY = 8
-    private const val MAX_RETRY_COUNT = 3
+    // 初次尝试加最多 7 次轮换，覆盖当前 8 个已配置解析节点。 
+    private const val MAX_RETRY_COUNT = 7
     private const val STALL_TIMEOUT_MS = 25_000L
 
     interface DownloadCallback {
@@ -332,12 +333,11 @@ object SongOkDownloadManager {
                 Log.w(TAG, "Rejecting downloaded media for ${song.title}: ${inspection.reason}")
                 SongFileValidator.forget(downloadedFile)
                 clearBrokenDownload(task, target)
-                pending.remove(key)
-                progress.remove(key)
                 val message = inspection.durationMs?.let { duration ->
                     "服务器返回试听片段（${duration / 1000}秒），未保存也未加入已点"
                 } ?: "下载文件不是有效歌曲视频，未保存也未加入已点"
-                callback?.onDownloadFailed(song, message)
+                // 单个节点返回截断/试听文件时尝试下一节点；最终仍由文件校验决定能否入库。
+                retryOrFail(song, callback, attempt, "invalid media: ${inspection.reason}", message)
                 return
             }
             if (target.exists() && !target.delete()) {
@@ -415,6 +415,17 @@ object SongOkDownloadManager {
         progress[key] = 0
         callback?.onDownloadProgress(song, 0)
         song.downloadUrl = null
+        val failure = reason.lowercase(java.util.Locale.ROOT)
+        val shouldRotateSource = listOf(
+            "http", "stalled", "network", "timeout", "socket", "connect",
+            "file too small", "invalid media", "decrypt", "download",
+        ).any({ marker -> failure.contains(marker) })
+        if (shouldRotateSource) {
+            SongApiClient.markLastSongSourceFailed()
+            Log.w(TAG, "Rotating source after media failure: $reason")
+        }
+        // markLastSongSourceFailed 会先更新 JS 的优先级列表，再清会话；
+        // 新会话因此继续沿用降级后的顺序，而不是重置回已失效节点。
         SongApiClient.clearTokenCache()
         io.execute {
             Thread.sleep((attempt * 750L).coerceAtMost(2_250L))

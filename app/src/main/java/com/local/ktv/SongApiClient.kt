@@ -45,7 +45,7 @@ object SongApiClient {
 
     @JvmStatic
     fun getSongDownloadUrl(musicno: String?): String? =
-        musicno?.takeIf(String::isNotBlank)?.let { getSongDownloadUrl(it, "720", false) }
+        musicno?.takeIf(String::isNotBlank)?.let { getSongDownloadUrl(it, "2160", false) }
 
     @JvmStatic
     fun getSongDownloadUrl(musicno: String, resolution: String, h265: Boolean): String? {
@@ -138,6 +138,14 @@ object SongApiClient {
     @JvmStatic
     fun resetSourceSession() {
         bridge?.resetApiSession()
+    }
+
+    /** 实际媒体下载失败时，通知 JS/原生解析器轮换到下一来源。 */
+    @JvmStatic
+    fun markLastSongSourceFailed() {
+        val activeBridge = bridge
+        if (activeBridge != null) activeBridge.markLastSongSourceFailed()
+        else SongUrlResolver.markLastSourceFailed()
     }
 
     /** 最近一次取址命中的源：优先 JS 上报，其次原生兜底记录（供远程日志的「请求源=」）。 */
