@@ -1,0 +1,2 @@
+29ede2888213df079d37803ad74c29768437953ec163ad5a3dba59cf97326de0  xiaoxiao-ktv-license-issuer.apk
+a0f68835628e2dbdb6f88ba1ed2cbc711018375935ebc32e9f4139c24583da6b  xiaoxiao-ktv-qa.apk
