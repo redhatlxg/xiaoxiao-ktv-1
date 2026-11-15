@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "feature/offline-one-device-license"
+      - "release/offline-short-license-1.6.9"
     tags:
       - "v*"
   workflow_dispatch:
@@ -43,7 +44,6 @@ jobs:
           KTV_STORE_PASSWORD: ${{ secrets.KTV_STORE_PASSWORD }}
           KTV_KEY_ALIAS: ${{ secrets.KTV_KEY_ALIAS }}
           KTV_KEY_PASSWORD: ${{ secrets.KTV_KEY_PASSWORD }}
-          KTV_LICENSE_PUBLIC_KEY_B64: ${{ secrets.KTV_LICENSE_PUBLIC_KEY_B64 }}
           DOWNLOAD_REPO_TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}
         run: |
           test -n "$DOWNLOAD_REPO_TOKEN" || (echo "::error::Missing DOWNLOAD_REPO_TOKEN secret with write access to redhatlxg/xiaoxiao-ktv-download"; exit 1)
@@ -68,25 +68,44 @@ jobs:
 
       - name: Build optimized signed release APK
         env:
-          KTV_LICENSE_PUBLIC_KEY_B64: ${{ secrets.KTV_LICENSE_PUBLIC_KEY_B64 }}
           KTV_STORE_PASSWORD: ${{ secrets.KTV_STORE_PASSWORD }}
           KTV_KEY_ALIAS: ${{ secrets.KTV_KEY_ALIAS }}
           KTV_KEY_PASSWORD: ${{ secrets.KTV_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon clean :app:assembleRelease -x :app:lintVitalRelease
+        run: ./gradlew --no-daemon clean :app:testDebugUnitTest :app:assembleRelease :mobile-issuer:assembleRelease -x :app:lintVitalRelease
 
-      - name: Verify APK signature and release properties
+      - name: Verify release signatures match v1.6.8 and package both apps
         run: |
+          set -euo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
           APK="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
+          MOBILE_APK="mobile-issuer/build/outputs/apk/release/mobile-issuer-release.apk"
+          OLD_APK="$RUNNER_TEMP/xiaoxiao-ktv-v1.6.8.apk"
           test -n "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" > "$RUNNER_TEMP/apk-badging.txt"
-          if grep -q '^application-debuggable' "$RUNNER_TEMP/apk-badging.txt"; then
-            echo "::error::Release APK is debuggable"; exit 1
+          test -s "$MOBILE_APK"
+          curl -fsSL "https://github.com/redhatlxg/xiaoxiao-ktv-download/releases/download/v1.6.8/xiaoxiao-ktv-release.apk" -o "$OLD_APK"
+          "$APKSIGNER" verify --verbose "$APK"
+          "$APKSIGNER" verify --verbose "$MOBILE_APK"
+          "$APKSIGNER" verify --verbose "$OLD_APK"
+          cert_sha256() {
+            "$APKSIGNER" verify --print-certs "$1" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1
+          }
+          OLD_CERT="$(cert_sha256 "$OLD_APK")"
+          TV_CERT="$(cert_sha256 "$APK")"
+          PHONE_CERT="$(cert_sha256 "$MOBILE_APK")"
+          test -n "$OLD_CERT" && test "$OLD_CERT" = "$TV_CERT" || (echo "::error::TV APK signing certificate differs from v1.6.8; upgrade would cause signature conflict"; exit 1)
+          test "$OLD_CERT" = "$PHONE_CERT" || (echo "::error::Phone issuer was not signed with the established release key"; exit 1)
+          "$AAPT" dump badging "$APK" > "$RUNNER_TEMP/tv-badging.txt"
+          "$AAPT" dump badging "$MOBILE_APK" > "$RUNNER_TEMP/phone-badging.txt"
+          if grep -q '^application-debuggable' "$RUNNER_TEMP/tv-badging.txt" "$RUNNER_TEMP/phone-badging.txt"; then
+            echo "::error::A release APK is debuggable"; exit 1
           fi
           mkdir -p release-output
           cp "$APK" release-output/xiaoxiao-ktv-release.apk
-          sha256sum release-output/xiaoxiao-ktv-release.apk > release-output/SHA256SUMS.txt
-
+          cp "$MOBILE_APK" release-output/xiaoxiao-ktv-mobile-license.apk
+          (cd release-output && sha256sum *.apk > SHA256SUMS.txt)
+          echo "Verified v1.6.8 signing certificate: $OLD_CERT"
+          echo "TV and phone issuer are both signed with the established release certificate."
       - name: Save permanent APK copy in private repository
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -104,6 +123,7 @@ jobs:
           fi
           mkdir -p "$RUNNER_TEMP/backup-payload"
           cp release-output/xiaoxiao-ktv-release.apk "$RUNNER_TEMP/backup-payload/xiaoxiao-ktv-release.apk"
+          cp release-output/xiaoxiao-ktv-mobile-license.apk "$RUNNER_TEMP/backup-payload/xiaoxiao-ktv-mobile-license.apk"
           cp release-output/SHA256SUMS.txt "$RUNNER_TEMP/backup-payload/SHA256SUMS.txt"
           git fetch origin private-backups || true
           if git show-ref --verify --quiet refs/remotes/origin/private-backups; then
@@ -144,12 +164,12 @@ jobs:
           VERSION="${TAG#v}"
           APK_URL="https://github.com/${DOWNLOAD_REPO}/releases/download/${TAG}/xiaoxiao-ktv-release.apk"
           APK_SHA256="$(sha256sum release-output/xiaoxiao-ktv-release.apk | awk '{print $1}')"
-          RELEASE_NOTES="晓晓呀 KTV ${TAG} 正式签名版。已通过 APK 签名校验和非 Debuggable 检查。SHA-256: ${APK_SHA256}"
+          RELEASE_NOTES="晓晓呀 KTV ${TAG} 离线短码正式版。含电视端和安卓手机授权助手。电视端签名已与 v1.6.8 原正式版证书核对一致。SHA-256: ${APK_SHA256}"
 
           if gh release view "$TAG" --repo "$DOWNLOAD_REPO" >/dev/null 2>&1; then
-            gh release upload "$TAG" release-output/xiaoxiao-ktv-release.apk release-output/SHA256SUMS.txt --repo "$DOWNLOAD_REPO" --clobber
+            gh release upload "$TAG" release-output/xiaoxiao-ktv-release.apk release-output/xiaoxiao-ktv-mobile-license.apk release-output/SHA256SUMS.txt --repo "$DOWNLOAD_REPO" --clobber
           else
-            gh release create "$TAG" release-output/xiaoxiao-ktv-release.apk release-output/SHA256SUMS.txt --repo "$DOWNLOAD_REPO" --title "晓晓呀 KTV ${TAG}" --notes "$RELEASE_NOTES"
+            gh release create "$TAG" release-output/xiaoxiao-ktv-release.apk release-output/xiaoxiao-ktv-mobile-license.apk release-output/SHA256SUMS.txt --repo "$DOWNLOAD_REPO" --title "晓晓呀 KTV ${TAG}" --notes "$RELEASE_NOTES"
           fi
 
           VERSION_CODE="$(sed -n 's/.*versionCode \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -n1)"

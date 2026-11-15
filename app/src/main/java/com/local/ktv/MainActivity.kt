@@ -465,6 +465,100 @@ class MainActivity : AppCompatActivity() {
 
 
     /** Re-check at least once per minute so clock changes cannot keep an expired trial open. */
+    /** 把试用期和限时授权剩余时间显示在 TV 主界面右上角。 */
+    private var licenseStatusBadge: TextView? = null
+
+    private fun formatLicenseTime(remainingMs: Long): String {
+        if (remainingMs <= 0L) return "已到期"
+        val minutes = (remainingMs + 59_999L) / 60_000L
+        val days = minutes / (24L * 60L)
+        val hours = (minutes % (24L * 60L)) / 60L
+        val mins = minutes % 60L
+        return when {
+            days > 0L -> "${days}天${hours}小时"
+            hours > 0L -> "${hours}小时${mins}分钟"
+            mins > 0L -> "${mins}分钟"
+            else -> "不足1分钟"
+        }
+    }
+
+    private val licenseExpiryRunnable = object : Runnable {
+        override fun run() {
+            if (isFinishing || isDestroyed) return
+            val remaining = OfflineLicense.licenseRemainingMillis(this@MainActivity) ?: return
+            if (remaining <= 0L || !OfflineLicense.isActivated(this@MainActivity)) {
+                showOfflineLicenseDialog()
+            } else {
+                main.postDelayed(this, minOf(remaining, 60_000L))
+            }
+        }
+    }
+
+    private val licenseStatusTicker = object : Runnable {
+        override fun run() {
+            updateLicenseStatusBadge()
+            if (!isFinishing && !isDestroyed) main.postDelayed(this, 60_000L)
+        }
+    }
+
+    private fun installLicenseStatusBadge() {
+        val container = findViewById<FrameLayout>(android.R.id.content) ?: return
+        if (licenseStatusBadge == null) {
+            val density = resources.displayMetrics.density
+            fun badgeDp(value: Int) = (value * density + 0.5f).toInt()
+            licenseStatusBadge = TextView(this).apply {
+                textSize = 12f
+                setTextColor(Color.WHITE)
+                setPadding(badgeDp(12), badgeDp(7), badgeDp(12), badgeDp(7))
+                background = GradientDrawable().apply {
+                    setColor(0xDD20334D.toInt())
+                    cornerRadius = badgeDp(9).toFloat()
+                    setStroke(badgeDp(1), 0x665F91C8)
+                }
+                isClickable = true
+                isFocusable = true
+                elevation = badgeDp(5).toFloat()
+                setOnClickListener {
+                    val force = !OfflineLicense.isActivated(this@MainActivity) &&
+                        OfflineLicense.trialRemainingMillis(this@MainActivity) <= 0L
+                    showOfflineLicenseDialog(forceExit = force)
+                }
+            }
+            container.addView(licenseStatusBadge, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.END
+            ).apply {
+                topMargin = badgeDp(10)
+                rightMargin = badgeDp(12)
+            })
+        }
+        updateLicenseStatusBadge()
+        main.removeCallbacks(licenseStatusTicker)
+        main.postDelayed(licenseStatusTicker, 60_000L)
+    }
+
+    private fun updateLicenseStatusBadge() {
+        val badge = licenseStatusBadge ?: return
+        if (OfflineLicense.isActivated(this)) {
+            val remaining = OfflineLicense.licenseRemainingMillis(this)
+            if (remaining == null) {
+                badge.visibility = View.GONE
+            } else {
+                badge.text = "授权剩余：${formatLicenseTime(remaining)}"
+                badge.visibility = View.VISIBLE
+            }
+        } else {
+            val remaining = OfflineLicense.trialRemainingMillis(this)
+            badge.text = if (remaining > 0L) {
+                "免费试用剩余：${formatLicenseTime(remaining)}"
+            } else {
+                "试用已到期 · 点击激活"
+            }
+            badge.visibility = View.VISIBLE
+        }
+    }
+
     private fun scheduleTrialExpiryCheck() {
         val remaining = OfflineLicense.trialRemainingMillis(this)
         if (remaining <= 0L) {
@@ -478,22 +572,36 @@ class MainActivity : AppCompatActivity() {
 
     /** Offline one-device activation. */
     private fun showOfflineLicenseDialog(forceExit: Boolean = true) {
+        if (isFinishing || isDestroyed) return
         val machine = runCatching { OfflineLicense.machineCode(this) }
-            .getOrElse { "设备标识读取失败：\${it.message.orEmpty()}" }
+            .getOrElse { "设备标识读取失败：${it.message.orEmpty()}" }
+        val activated = OfflineLicense.isActivated(this)
+        val licensedRemaining = if (activated) OfflineLicense.licenseRemainingMillis(this) else null
+        val trialRemaining = if (activated) -1L else OfflineLicense.trialRemainingMillis(this)
+        val statusLine = when {
+            activated && licensedRemaining == null -> "当前状态：永久授权已生效"
+            activated && licensedRemaining != null -> {
+                val expiry = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.CHINA)
+                    .format(java.util.Date(System.currentTimeMillis() + licensedRemaining))
+                "当前授权剩余：${formatLicenseTime(licensedRemaining)}（到期：$expiry）"
+            }
+            trialRemaining > 0L -> "免费试用剩余：${formatLicenseTime(trialRemaining)}"
+            else -> "免费试用已结束，请激活后继续使用。"
+        }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(36, 12, 36, 4)
         }
         val info = TextView(this).apply {
-            text = "软件价格：69元（一次付费，永久使用）\\n授权方式：一机一码，仅限本设备使用。\\n授权提供方 QQ：1435051399\\n请联系提供方获取授权码，并发送下面的机器码。\\n\\n机器码：\\n$machine"
-            textSize = 17f
+            text = "软件价格：69元\n授权方式：离线短激活码，一机一码。\n$statusLine\n\n第一步：复制下面的机器码。\n第二步：在安卓手机《晓晓呀 KTV 手机离线授权助手》中输入机器码并选择激活天数。\n第三步：生成短激活码后粘贴到下方。\n\n本设备机器码：\n$machine"
+            textSize = 16f
             setTextIsSelectable(true)
         }
         val input = EditText(this).apply {
-            hint = "请粘贴收到的授权码"
+            hint = "粘贴手机授权助手生成的短激活码"
             minLines = 2
-            maxLines = 4
-            textSize = 14f
+            maxLines = 3
+            textSize = 16f
         }
         panel.addView(info)
         panel.addView(input, LinearLayout.LayoutParams(
@@ -509,38 +617,25 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.setCancelable(!forceExit)
         dialog.setCanceledOnTouchOutside(!forceExit)
-        if (!forceExit) {
-            dialog.setOnShowListener {
-                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { dialog.dismiss() }
-                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("KTV机器码", machine))
-                    toast("机器码已复制")
-                }
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                    if (OfflineLicense.activate(this, input.text.toString())) {
-                        toast("授权成功")
-                        dialog.dismiss()
-                        showSettingsPage(false)
-                    } else toast("授权码无效，或不属于这台设备")
-                }
-            }
-            dialog.show()
-            return
-        }
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("KTV机器码", machine))
                 toast("机器码已复制")
             }
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                if (forceExit) finish() else dialog.dismiss()
+            }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 if (OfflineLicense.activate(this, input.text.toString())) {
-                    toast("授权成功，正在进入软件")
+                    toast("激活成功")
                     dialog.dismiss()
-                    recreate()
+                    if (forceExit) recreate() else {
+                        updateLicenseStatusBadge()
+                        showSettingsPage(false)
+                    }
                 } else {
-                    toast("授权码无效，或不属于这台设备")
+                    toast("激活码无效、天数信息错误或不属于这台设备")
                 }
             }
         }
@@ -566,13 +661,20 @@ class MainActivity : AppCompatActivity() {
             requestStorage()
             return
         }
-        if (!OfflineLicense.isActivated(this)) {
-            if (OfflineLicense.trialRemainingMillis(this) <= 0L) {
+        // Initialize and persist the trial clock even when this device is already licensed,
+        // so an expired term license cannot unlock a fresh trial period afterwards.
+        val trialRemaining = OfflineLicense.trialRemainingMillis(this)
+        val licenseActive = OfflineLicense.isActivated(this)
+        if (!licenseActive) {
+            if (trialRemaining <= 0L) {
                 showOfflineLicenseDialog()
                 return
             }
             scheduleTrialExpiryCheck()
+        } else if (OfflineLicense.licenseRemainingMillis(this) != null) {
+            main.post(licenseExpiryRunnable)
         }
+        installLicenseStatusBadge()
         // 存储目录建不出来时**不再闪退**（极米 H1S / Android 5.1.1 的历史崩溃点），
         // AppPaths.init 已在 Application.attachBaseContext 里挑好可写根目录。
         if (!AppPaths.ensureDirectories()) {
@@ -893,6 +995,8 @@ class MainActivity : AppCompatActivity() {
         main.removeCallbacks(homeBannerRunnable)
         main.removeCallbacks(autoFullscreenRunnable)
         main.removeCallbacks(remoteNetworkMonitor)
+        main.removeCallbacks(licenseStatusTicker)
+        main.removeCallbacks(licenseExpiryRunnable)
         KtvNetworkMonitor.stop()
         stopRecording(false)
         unregisterMicInputWatcher()

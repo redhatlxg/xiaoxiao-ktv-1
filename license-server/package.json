@@ -1,8 +1,0 @@
-{
-  "name": "xiaoxiao-ktv-license-server",
-  "private": true,
-  "version": "1.0.0",
-  "description": "Standalone license API for XiaoxiaoYa KTV",
-  "scripts": { "deploy": "wrangler deploy", "dev": "wrangler dev", "db:init": "wrangler d1 execute xiaoxiao-ktv-license --local --file=./schema.sql" },
-  "devDependencies": { "wrangler": "^4.0.0" }
-}
