@@ -2,7 +2,9 @@ name: Android QA Build
 
 on:
   push:
-    branches: [master]
+    branches: [master, 'ui/**', 'feature/**', 'archive/**']
+  pull_request:
+    branches: [master, 'ui/**']
   workflow_dispatch:
 
 concurrency:
@@ -10,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   qa-build:
@@ -37,7 +39,89 @@ jobs:
         run: |
           node --check app/src/main/assets/mobile/app.js
           node --check app/src/main/assets/mobile/ktv_api.js
-          node -e 'const fs=require("fs");const s=fs.readFileSync("app/src/main/assets/mobile/app.js","utf8");if(/(^|[^$])\$\("\[data-singer-group\]"\)\.forEach/m.test(s)){console.error("Invalid single-element selector used as a collection");process.exit(1)}'
+          node <<'NODE'
+          const fs = require("node:fs");
+          const js = fs.readFileSync("app/src/main/assets/mobile/app.js", "utf8");
+          const invalidCollections = [
+            /(?<!\$)\$\(["'][^"']+["']\)\.forEach\s*\(/g,
+            /(?<!\$)\$\(["'][^"']+["']\)\.map\s*\(/g
+          ];
+          for (const pattern of invalidCollections) {
+            const matches = js.match(pattern) || [];
+            if (matches.length) {
+              console.error("Single-element query used as a collection:", matches.join(", "));
+              process.exit(1);
+            }
+          }
+          console.log("Mobile selector collection checks passed");
+          NODE
+
+      - name: Validate rebuilt mobile singer flow
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const app = fs.readFileSync("app/src/main/assets/mobile/app.js", "utf8");
+          const main = fs.readFileSync("app/src/main/java/com/local/ktv/MainActivity.kt", "utf8");
+          const checks = [
+            ["singer cards are native touch buttons", app.includes('<button type="button" class="singer-card"') && app.includes('data-singer-id="${escapeHtml(singer.id)}"')],
+            ["card click delegates using stable singer ID and name", app.includes('closest(".singer-card[data-singer-id]")') && app.includes("openSingerDetail(singerCard.dataset.singerId, singerCard.dataset.singerName)")],
+            ["detail fetches the dedicated singer-ID endpoint", app.includes('/api/v1/singers/" + encodeURIComponent(singerId) + "/songs') && app.includes("loadSingerSongs(true)")],
+            ["detail has independent pagination and loading/error states", app.includes("uiState.singerPage") && app.includes("data.hasMore") && app.includes("歌曲加载失败")],
+            ["return navigation restores singer list", app.includes("function backToSingerList()") && app.includes("loadSingers(true, returnPage)")],
+            ["native endpoint routes singer ID to exact database lookup", main.includes('path.startsWith("/api/v1/singers/") && path.endsWith("/songs")') && main.includes("library.muse.songsBySinger(singerId") && main.includes("library.muse.singerNameById(singerId)")],
+            ["legacy relation gaps have singer-name fallback", main.includes("songsBySingerName(singerName, offset, pageSize + 1)") && main.includes("countSongsBySingerName(singerName)")]
+          ];
+          const failed = checks.filter(([, ok]) => !ok);
+          if (failed.length) {
+            for (const [name] of failed) console.error("Rebuilt singer flow check failed: " + name);
+            process.exit(1);
+          }
+          console.log("Rebuilt mobile singer flow checks passed");
+          NODE
+
+      - name: Validate adaptive TV layouts
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const singer = fs.readFileSync("app/src/main/java/com/local/ktv/SingerGridAdapter.kt", "utf8");
+          const songs = fs.readFileSync("app/src/main/java/com/local/ktv/SongListAdapter.kt", "utf8");
+          const categories = fs.readFileSync("app/src/main/java/com/local/ktv/PlaylistGridAdapter.kt", "utf8");
+          const main = fs.readFileSync("app/src/main/java/com/local/ktv/MainActivity.kt", "utf8");
+          const db = fs.readFileSync("app/src/main/java/com/local/ktv/MuseDatabase.kt", "utf8");
+          const layout = fs.readFileSync("app/src/main/res/layout/activity_main.xml", "utf8");
+          const checks = [
+            ["one singer maps to one native ListView item", singer.includes("override fun getCount(): Int = singers.size") && singer.includes("override fun getItem(position: Int): Array<String?> = singers[position]")],
+            ["singer rows leave activation to ListView", singer.includes("descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS") && singer.includes("isClickable = false") && !singer.includes("setOnClickListener(openSinger)")],
+            ["singer page uses fixed-size ListView paging", main.includes('"singer_list" -> 8') && singer.includes("one singer per ListView item")],
+            ["song columns follow screen width", songs.includes("columnsForMode(mode, context.resources.configuration.screenWidthDp)")],
+            ["singer page size follows ListView paging", main.includes('"singer_list" -> 8') && main.includes("browsePageSize()")],
+            ["ListView owns singer touch and remote activation", singer.includes("one singer per ListView item") && singer.includes("isClickable = false") && main.includes("visibleSingers.getOrNull(position)")],
+            ["singer adapter is installed without child click callbacks", main.includes("SingerGridAdapter(this, singers)")],
+            ["singer selection presents loading feedback", main.includes("busy(true,") && main.includes("busy(false,")],
+            ["singer row click uses direct row index", main.includes("visibleSingers.getOrNull(position)") && main.includes("loadSingerSongs(singer.getOrNull(0), singer.getOrNull(1))")],
+            ["singer selection loads songs outside the list click callback", main.includes("library.muse.songsBySinger(id, 0, pageSize)") && main.includes("BrowsePageResult(songs, total.coerceAtLeast(songs.size))")],
+            ["singer lookup tolerates missing relation tables", db.includes("PRAGMA table_info(song_singer_relations)") && db.includes("hasSingerRelations") && db.includes("idColumns.forEach") && db.includes("nameColumns.forEach")],
+            ["song page size follows columns", main.includes('SongListAdapter.columnsForMode("catalog", resources.configuration.screenWidthDp) * 5')],
+            ["keyboard text respects screen height", main.includes("keyboardConfig.screenHeightDp / 720f")],
+            ["ranking page header and horizontal selector exist", layout.includes('android:id="@+id/rank_page_header"') && layout.includes('android:id="@+id/rank_category_scroll"') && layout.includes('android:id="@+id/rank_category_grid"')],
+            ["ranking spotlight replaces the old left-side three-column tiles", layout.includes('android:id="@+id/rank_spotlight_card"') && !layout.includes('android:columnCount="3"') && main.includes("private var rankCategoryGrid: LinearLayout?")],
+            ["rank selector chips render every available chart", main.includes("currentCategories.forEachIndexed") && main.includes("selectRankPlaylist(index)") && main.includes("LinearLayout.LayoutParams(-2, dp(44))")],
+            ["rank charts keep real Muse playlist IDs and counts", main.includes("rankPlaylistIds.add(id)") && main.includes("rankPlaylistCounts.add") && main.includes('library.muse.rankSongs(key.param, offset, key.pageSize)')],
+            ["Douyin chart discovery uses real named playlists", db.includes("name LIKE '%抖音%'") && db.includes("name LIKE '%短视频%'") && db.includes("type=2")],
+            ["ranking spotlight tracks the selected chart and page", main.includes("updateRankSpotlight()") && main.includes("rankSpotlightSong?.text") && main.includes("updateRankPageHeader()")],
+            ["rank rows expose download and more actions", songs.includes("private fun createRankRow") && songs.includes("callbacks.onDownload(song)") && songs.includes("callbacks.onMore(song)")],
+            ["all ranking entries route to one implementation", !main.includes("showRank()") && main.includes('addNav("🏆 排行榜", View.OnClickListener { v: View? -> loadHotSongs() })') && main.includes('addTile(grid, "热门排行", "按点播热度排序", View.OnClickListener { v: View? -> loadHotSongs() })')],
+            ["category cards use custom artwork without generic MUSIC badge", categories.includes("dp(112), dp(112), Gravity.CENTER") && !categories.includes('text = "MUSIC"') && categories.includes("iconRes(name)")],
+            ["category titles and song counts have dedicated readable rows", categories.includes("maxLines = 2") && categories.includes('"SONGS  ·  $it"') && categories.includes("LinearLayout.LayoutParams(-1, dp(64))")],
+            ["category cards keep one full-card remote focus target", categories.includes("setAccessibleFocus(") && categories.includes("setOnClickListener { onPlaylistClick(playlist) }") && categories.includes("TvFocusStyler.install(this)")]
+          ];
+          const failed = checks.filter(([, ok]) => !ok);
+          if (failed.length) {
+            for (const [name] of failed) console.error("Adaptive layout check failed: " + name);
+            process.exit(1);
+          }
+          console.log("Adaptive TV layout checks passed");
+          NODE
 
       - name: Validate Xiaoxiaoya branding
         run: |
@@ -48,9 +132,9 @@ jobs:
           const js = fs.readFileSync("app/src/main/assets/mobile/app.js", "utf8");
           const main = fs.readFileSync("app/src/main/java/com/local/ktv/MainActivity.kt", "utf8");
           const checks = [
-            ["launcher name", app.includes('<string name="app_name">晓晓呀</string>')],
+            ["launcher name", app.includes('<string name="app_name">晓晓呀 KTV</string>')],
             ["mobile title", html.includes("<title>晓晓呀")],
-            ["mobile heading", html.includes("<h1>晓晓呀</h1>")],
+            ["mobile heading", html.includes("<h1>晓晓呀 KTV</h1>")],
             ["mobile connection status", js.includes("已连接晓晓呀") && js.includes("正在连接晓晓呀")],
             ["TV heading", main.includes('label("晓晓呀"')]
           ];
@@ -62,10 +146,55 @@ jobs:
           console.log("Xiaoxiaoya branding checks passed");
           NODE
 
+      - name: Validate Xiaoxiaoya icon and source failover
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const manifest = fs.readFileSync("app/src/main/AndroidManifest.xml", "utf8");
+          const layout = fs.readFileSync("app/src/main/res/layout/activity_main.xml", "utf8");
+          const html = fs.readFileSync("app/src/main/assets/mobile/index.html", "utf8");
+          const remote = fs.readFileSync("app/src/main/java/com/local/ktv/LocalRemoteServer.kt", "utf8");
+          const api = fs.readFileSync("app/src/main/assets/mobile/ktv_api.js", "utf8");
+          const bridge = fs.readFileSync("app/src/main/java/com/local/ktv/KtvJsBridge.kt", "utf8");
+          const resolver = fs.readFileSync("app/src/main/java/com/local/ktv/SongUrlResolver.kt", "utf8");
+          const downloader = fs.readFileSync("app/src/main/java/com/local/ktv/SongOkDownloadManager.kt", "utf8");
+          const checks = [
+            ["square brand icon asset", fs.existsSync("app/src/main/res/drawable-nodpi/ktv_brand_icon.webp")],
+            ["horizontal TV brand asset", fs.existsSync("app/src/main/res/drawable-nodpi/ktv_brand_horizontal.webp")],
+            ["launcher uses brand icon", manifest.includes('android:icon="@drawable/ktv_brand_icon"')],
+            ["TV header uses horizontal brand", layout.includes('@drawable/ktv_brand_horizontal')],
+            ["mobile remote uses square brand", html.includes('/res/drawable-nodpi/ktv_brand_icon.webp') && remote.includes('ktv_brand_icon.webp')],
+            ["JS supports source rotation", api.includes("markLastSourceFailed: function()") && api.includes("lastSongSource = host")],
+            ["bridge and native resolver share fallback", bridge.includes("window.KtvApiConfig.HOSTS") && resolver.includes("markLastSourceFailed()")],
+            ["download retries rotate source", downloader.includes("SongApiClient.markLastSongSourceFailed()") && downloader.includes("MAX_RETRY_COUNT = 7")],
+          ];
+          const failed = checks.filter(([, ok]) => !ok);
+          if (failed.length) {
+            for (const [name] of failed) console.error("Icon/source check failed: " + name);
+            process.exit(1);
+          }
+          console.log("Xiaoxiaoya icon and multi-source failover checks passed");
+          NODE
+
       # Package the installable QA APK first; tests run afterward and their result remains visible.
       - name: Build QA APK
         id: build-apk
+        env:
+          KTV_LICENSE_PUBLIC_KEY_B64: ${{ secrets.KTV_LICENSE_PUBLIC_KEY_B64 }}
         run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Build mobile offline license issuer APK
+        id: build-issuer
+        run: ./gradlew --no-daemon :mobile-issuer:assembleDebug
+
+      - name: Upload mobile issuer APK
+        if: always() && steps.build-issuer.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaoxiao-ktv-mobile-license-issuer
+          path: mobile-issuer/build/outputs/apk/debug/mobile-issuer-debug.apk
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Run unit tests
         id: unit-tests
@@ -78,4 +207,59 @@ jobs:
           name: maidong-ktv-qa-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+      - name: Save issuer and QA APK permanently in private repository
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/backup-payload"
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/backup-payload/xiaoxiao-ktv-qa.apk"
+          cp mobile-issuer/build/outputs/apk/debug/mobile-issuer-debug.apk "$RUNNER_TEMP/backup-payload/xiaoxiao-ktv-license-issuer.apk"
+          (cd "$RUNNER_TEMP/backup-payload" && sha256sum *.apk > SHA256SUMS.txt)
+          git fetch origin private-backups || true
+          if git show-ref --verify --quiet refs/remotes/origin/private-backups; then
+            git worktree add -B private-backups "$RUNNER_TEMP/private-backups" origin/private-backups
+          else
+            git worktree add --detach "$RUNNER_TEMP/private-backups" HEAD
+            git -C "$RUNNER_TEMP/private-backups" checkout --orphan private-backups
+            git -C "$RUNNER_TEMP/private-backups" rm -rf . >/dev/null 2>&1 || true
+          fi
+          mkdir -p "$RUNNER_TEMP/private-backups/issuer-and-qa/$SOURCE_SHA"
+          cp "$RUNNER_TEMP/backup-payload/"* "$RUNNER_TEMP/private-backups/issuer-and-qa/$SOURCE_SHA/"
+          printf 'Private QA and license issuer APK backup\nSource commit: %s\n' "$SOURCE_SHA" > "$RUNNER_TEMP/private-backups/issuer-and-qa/$SOURCE_SHA/README.txt"
+          git -C "$RUNNER_TEMP/private-backups" config user.name "github-actions[bot]"
+          git -C "$RUNNER_TEMP/private-backups" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$RUNNER_TEMP/private-backups" add "issuer-and-qa/$SOURCE_SHA"
+          git -C "$RUNNER_TEMP/private-backups" commit -m "backup: preserve issuer and QA APK $SOURCE_SHA"
+          git -C "$RUNNER_TEMP/private-backups" push origin private-backups
+
+      - name: Publish QA APK and license issuer together
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}
+          APK_PATH: app/build/outputs/apk/debug/app-debug.apk
+          ISSUER_APK_PATH: mobile-license-issuer.apk
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test -s "$APK_PATH"
+          ISSUER_APK_SOURCE="mobile-issuer/build/outputs/apk/debug/mobile-issuer-debug.apk"
+          test -s "$ISSUER_APK_SOURCE"
+          cp "$ISSUER_APK_SOURCE" "$ISSUER_APK_PATH"
+          test -s "$ISSUER_APK_PATH"
+
+          TAG="qa-${SOURCE_SHA:0:12}"
+          echo "Publishing both APKs to tag: $TAG"
+          gh release create "$TAG" "$APK_PATH" "$ISSUER_APK_PATH" \
+            --repo redhatlxg/xiaoxiao-ktv-download \
+            --prerelease \
+            --title "晓晓呀 KTV 测试版 ${TAG}" \
+            --notes "自动构建测试版。源码提交：${SOURCE_SHA}。此版本用于测试，不代表正式稳定版。"
+
+          ASSETS="$(gh api "repos/redhatlxg/xiaoxiao-ktv-download/releases/tags/$TAG" --jq '[.assets[].name] | sort | join(",")')"
+          echo "Published release assets: $ASSETS"
+          test "$ASSETS" = "app-debug.apk,mobile-license-issuer.apk"

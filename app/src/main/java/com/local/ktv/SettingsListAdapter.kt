@@ -18,7 +18,7 @@ data class SettingsEntry(
     val title: String,
     var subtitle: String = "",
     val actionText: String = "设置",
-    val checked: Boolean? = null,
+    var checked: Boolean? = null,
     val action: () -> Unit,
 )
 
@@ -62,6 +62,8 @@ class SettingsListAdapter(
             }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { marginStart = dp(10) })
 
             if (entry.checked != null) {
+                // Capture the nullable mutable property once; Kotlin cannot smart-cast it later.
+                val checked = entry.checked == true
                 addView(Switch(context).apply {
                     id = actionIds[position]
                     nextFocusUpId = if (position == 0 && topFocusId != View.NO_ID) {
@@ -70,12 +72,12 @@ class SettingsListAdapter(
                         actionIds[(position - 1).coerceAtLeast(0)]
                     }
                     nextFocusDownId = actionIds[(position + 1).coerceAtMost(entries.lastIndex)]
-                    isChecked = entry.checked
+                    isChecked = checked
                     // showText 属性是 API 21 引入的, Android 4.4 的 Switch 本来就不显示按钮文字。
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) showText = false
                     setAccessibleFocus(
                         "focus:settings:${entry.title}",
-                        "${entry.title}${entry.subtitle.takeIf(String::isNotEmpty)?.let { "，$it" }.orEmpty()}，${if (entry.checked) "已开启" else "已关闭"}",
+                        "${entry.title}${entry.subtitle.takeIf(String::isNotEmpty)?.let { "，$it" }.orEmpty()}，${if (checked) "已开启" else "已关闭"}",
                     )
                     isFocusable = true
                     isFocusableInTouchMode = false

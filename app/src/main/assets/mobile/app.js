@@ -7,7 +7,9 @@ const uiState = {
   page: 1, query: "", searchMode: "song", busy: false, resultMode: "songs", singerGroup: "all",
   hotPage: 1, hotPageSize: 10, hotBusy: false, favoritesBusy: false,
   visible: true, connected: false, eqEnabled: false, category: "", queueBusy: false, queuePollAt: 0,
-  equalizer: null, searchAbort: null, searchKey: ""
+  equalizer: null, searchAbort: null, searchKey: "",
+  currentSinger: "", currentSingerId: "", singerPage: 1, singerBusy: false, singerReturnQuery: "", singerReturnPage: 1, singerReturnGroup: "all",
+  loadedSongCount: 0
 };
 
 function escapeHtml(value) {
@@ -60,19 +62,27 @@ function singerRow(singer, index) {
   const avatar = singer.image
     ? `<span class="singer-avatar-fallback">${avatarText}</span><img class="singer-avatar-image" src="${escapeHtml(singer.image)}" alt="" loading="lazy">`
     : `<span class="singer-avatar-fallback">${avatarText}</span>`;
-  return `<div class="song singer-row">
+  const singerName = escapeHtml(singer.name);
+  return `<button type="button" class="singer-card" data-singer-id="${escapeHtml(singer.id)}" data-singer-name="${singerName}" aria-label="查看${singerName}演唱的歌曲">
     <div class="song-index">${String(index + 1).padStart(2, "0")}</div>
     <div class="singer-avatar">${avatar}</div>
-    <div class="info"><b>${escapeHtml(singer.name)}</b><p>${escapeHtml([singer.area, singer.type].filter(Boolean).join(" · ") || "歌手")}</p></div>
-    <button class="singer-select" type="button" data-singer="${escapeHtml(singer.name)}">查看歌曲</button>
-  </div>`;
+    <div class="info"><b>${singerName}</b><p>${escapeHtml([singer.area, singer.type].filter(Boolean).join(" · ") || "歌手")}</p></div>
+    <span class="singer-select" aria-hidden="true">查看歌曲 <span>›</span></span>
+  </button>`;
 }
 
-async function loadSingers(reset = true) {
+async function loadSingers(reset = true, pageOverride = null) {
   if (reset) {
-    uiState.page = 1;
+    uiState.page = Number.isInteger(pageOverride) ? Math.max(1, pageOverride) : 1;
+    uiState.currentSinger = "";
+    uiState.currentSingerId = "";
+    $("#search").classList.remove("singer-detail-open");
+    $("#singerDetailToolbar").classList.add("hidden");
     uiState.resultMode = "singers";
-    $("#results").innerHTML = "";
+    $("#results").classList.add("singer-results");
+    $("#results").innerHTML = uiState.currentSinger
+      ? '<div class="empty singer-loading"><span class="loading-dot"></span>正在加载歌手歌曲…</div>'
+      : "";
     $("#searchResultBlock").classList.remove("hidden");
     $("#resultTitle").textContent = "歌手分类";
     $("#resultSummary").textContent = "正在加载歌手…";
@@ -90,7 +100,9 @@ async function loadSingers(reset = true) {
         image.addEventListener("load", () => image.previousElementSibling?.classList.add("hidden"), { once: true });
       });
     } else if (reset) $("#results").innerHTML = '<div class="empty">这个分类暂时没有歌手</div>';
-    $("#resultSummary").textContent = singers.length ? `共显示 ${(requestedPage - 1) * 30 + singers.length} 位` : "暂无歌手";
+    $("#resultSummary").textContent = singers.length
+      ? (reset && requestedPage > 1 ? `第 ${requestedPage} 页 · 当前页 ${singers.length} 位` : `共显示 ${(requestedPage - 1) * 30 + singers.length} 位`)
+      : "暂无歌手";
     $("#more").classList.toggle("hidden", !data.hasMore);
     uiState.page = requestedPage + 1;
   } catch (error) {
@@ -100,9 +112,102 @@ async function loadSingers(reset = true) {
   }
 }
 
+function openSingerDetail(id, name) {
+  const singerId = String(id || "").trim();
+  const singerName = String(name || "").trim();
+  if (!singerId || !singerName) {
+    toast("歌手信息不完整，请刷新歌手列表");
+    return;
+  }
+  if (uiState.searchAbort) uiState.searchAbort.abort();
+  uiState.singerReturnQuery = $("#query").value.trim();
+  uiState.singerReturnPage = Math.max(1, uiState.page - 1);
+  uiState.singerReturnGroup = uiState.singerGroup;
+  uiState.currentSinger = singerName;
+  uiState.currentSingerId = singerId;
+  uiState.singerPage = 1;
+  uiState.singerBusy = false;
+  $("#search").classList.add("singer-detail-open");
+  $("#singerDetailToolbar").classList.remove("hidden");
+  $("#singerDetailName").textContent = singerName;
+  $("#singerDetailMeta").textContent = "正在读取专属曲库…";
+  $("#resultTitle").textContent = singerName + " · 演唱歌曲";
+  $("#resultSummary").textContent = "正在加载";
+  $("#results").classList.remove("singer-results");
+  $("#results").innerHTML = "";
+  $("#searchResultBlock").classList.remove("hidden");
+  $("#more").classList.add("hidden");
+  loadSingerSongs(true);
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+async function loadSingerSongs(reset = false) {
+  if (uiState.singerBusy) return;
+  if (reset) uiState.singerPage = 1;
+  const singerId = uiState.currentSingerId;
+  if (!singerId) return;
+  const page = uiState.singerPage;
+  uiState.singerBusy = true;
+  if (reset) {
+    $("#results").innerHTML = '<div class="empty singer-loading"><span class="loading-dot"></span>正在加载歌曲…</div>';
+    $("#singerDetailMeta").textContent = "正在查询";
+  } else {
+    $("#more").disabled = true;
+    $("#more").textContent = "正在加载…";
+  }
+  try {
+    const data = await api("/api/v1/singers/" + encodeURIComponent(singerId) + "/songs?page=" + page + "&pageSize=20");
+    const songs = Array.isArray(data.songs) ? data.songs : [];
+    const html = songs.map((song,index)=>songRow(song,false,false,(page-1)*20+index)).join("");
+    if (reset) $("#results").innerHTML = html || '<div class="empty">暂时没有收录这位歌手的歌曲</div>';
+    else if (html) $("#results").insertAdjacentHTML("beforeend",html);
+    $("#resultSummary").textContent = data.total != null ? "共 " + data.total + " 首歌曲" : (songs.length ? "已加载 " + ((page-1)*20+songs.length) + " 首" : "暂无歌曲");
+    $("#singerDetailMeta").textContent = data.total != null ? data.total + " 首歌曲" : "歌手专属曲库";
+    uiState.singerPage = page + 1;
+    $("#more").classList.toggle("hidden",!data.hasMore);
+    $("#more").disabled = false;
+    $("#more").textContent = "加载更多";
+    uiState.resultMode = "singer-songs";
+  } catch (error) {
+    if (reset) $("#results").innerHTML = '<div class="empty">歌曲加载失败：' + escapeHtml(error.message) + '<br><small>请检查电视端曲库连接后重试</small></div>';
+    $("#singerDetailMeta").textContent = "加载失败";
+    $("#more").classList.remove("hidden");
+    $("#more").disabled = false;
+    $("#more").textContent = "重试";
+    toast(error.message);
+  } finally { uiState.singerBusy = false; }
+}
+
+function backToSingerList() {
+  const returnQuery = uiState.singerReturnQuery;
+  const returnPage = uiState.singerReturnPage;
+  const returnGroup = uiState.singerReturnGroup;
+  if (uiState.searchAbort) uiState.searchAbort.abort();
+  uiState.currentSinger = "";
+  uiState.currentSingerId = "";
+  uiState.searchMode = "singer";
+  uiState.category = "";
+  uiState.searchKey = "";
+  uiState.singerGroup = returnGroup || "all";
+  $("#query").value = returnQuery;
+  $("#query").placeholder = "输入歌手名或拼音";
+  $("#search").classList.remove("singer-detail-open");
+  $("#singerDetailToolbar").classList.add("hidden");
+  $("#singerGroups").classList.remove("hidden");
+  $$("[data-singer-group]").forEach((item) =>
+    item.classList.toggle("active", item.dataset.singerGroup === uiState.singerGroup)
+  );
+  loadSingers(true, returnPage);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function openPage(name) {
   const pageName = name === "singers" || name === "ranking" ? "search" : name;
-  $("nav button,.page").forEach((element) => element.classList.remove("active"));
+  $$("nav button,.page").forEach((element) => element.classList.remove("active"));
+  $$("nav button").forEach((element) => {
+    if (element.dataset.page === name) element.setAttribute("aria-current", "page");
+    else element.removeAttribute("aria-current");
+  });
   $(`nav button[data-page="${name}"]`)?.classList.add("active");
   $("#" + pageName)?.classList.add("active");
   if (name === "queue") loadQueue();
@@ -111,9 +216,13 @@ function openPage(name) {
   if (name === "singers") {
     uiState.searchMode = "singer";
     uiState.category = "";
+    uiState.currentSinger = "";
+    $("#search").classList.remove("singer-detail-open");
+    $("#singerDetailToolbar").classList.add("hidden");
     $("#singerGroups").classList.remove("hidden");
+    $("#query").value = "";
     $("#query").placeholder = "输入歌手名或拼音";
-    $("[data-search-mode]").forEach((item) => item.classList.toggle("active", item.dataset.searchMode === "singer"));
+    $$("[data-search-mode]").forEach((item) => item.classList.toggle("active", item.dataset.searchMode === "singer"));
     uiState.singerGroup = "all";
     $$("[data-singer-group]").forEach((item) => item.classList.toggle("active", item.dataset.singerGroup === "all"));
     $("#searchResultBlock").classList.remove("hidden");
@@ -275,6 +384,7 @@ async function updateAudio(values) {
 async function search(reset = true) {
   if (reset) {
     uiState.resultMode = "songs";
+    $("#results").classList.remove("singer-results");
     const nextQuery = $("#query").value.trim();
     if (!nextQuery && !uiState.category) {
       toast(`请输入${uiState.searchMode === "singer" ? "歌手" : "歌曲"}名称`);
@@ -282,17 +392,22 @@ async function search(reset = true) {
       return;
     }
     // 同一关键词+同一搜索方式且结果已渲染 → 不重复请求设备(设备端也要查 1GB 曲库)。
-    const key = `${uiState.searchMode}|${nextQuery}|${uiState.category}`;
+    const key = uiState.currentSinger
+      ? `singer-detail|${uiState.currentSinger}`
+      : `${uiState.searchMode}|${nextQuery}|${uiState.category}`;
     if (key === uiState.searchKey && $("#results").childElementCount) {
       $("#searchResultBlock").scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
     uiState.page = 1;
+    uiState.loadedSongCount = 0;
     uiState.query = nextQuery;
     uiState.searchKey = key;
     $("#results").innerHTML = "";
     $("#searchResultBlock").classList.remove("hidden");
-    $("#resultTitle").textContent = uiState.category ? `${uiState.category} · 歌曲` : (uiState.searchMode === "singer" ? "歌手搜索结果" : "歌曲搜索结果");
+    $("#resultTitle").textContent = uiState.currentSinger
+      ? "演唱歌曲"
+      : (uiState.category ? `${uiState.category} · 歌曲` : (uiState.searchMode === "singer" ? "歌手搜索结果" : "歌曲搜索结果"));
     $("#resultSummary").textContent = `正在搜索“${uiState.query}”`;
     $("#more").classList.add("hidden");
     if (uiState.searchAbort) uiState.searchAbort.abort();
@@ -303,10 +418,17 @@ async function search(reset = true) {
   uiState.busy = true;
   try {
     const data = await api(`/api/v1/songs?q=${encodeURIComponent(uiState.query)}&type=${uiState.searchMode}&category=${encodeURIComponent(uiState.category)}&page=${requestedPage}&pageSize=20`, { signal });
-    const rows = (data.songs || []).map((song, index) => songRow(song, false, false, (requestedPage - 1) * 20 + index)).join("");
+    const songs = data.songs || [];
+    const rows = songs.map((song, index) => songRow(song, false, false, (requestedPage - 1) * 20 + index)).join("");
     if (rows) $("#results").insertAdjacentHTML("beforeend", rows);
-    else if (reset) $("#results").innerHTML = '<div class="empty">没有找到相关歌曲<br><small>请更换关键词后重试</small></div>';
-    $("#resultSummary").textContent = `“${uiState.query}”${data.hasMore ? "，还有更多" : ""}`;
+    else if (reset) $("#results").innerHTML = uiState.currentSinger
+      ? '<div class="empty">暂时没有收录这位歌手的歌曲<br><small>可以返回歌手列表，或尝试搜索歌手姓名</small></div>'
+      : '<div class="empty">没有找到相关歌曲<br><small>请更换关键词后重试</small></div>';
+    uiState.loadedSongCount += songs.length;
+    $("#resultSummary").textContent = uiState.currentSinger
+      ? `已加载 ${uiState.loadedSongCount} 首${data.hasMore ? " · 还有更多" : " · 已显示全部"}`
+      : `“${uiState.query}”${data.hasMore ? "，还有更多" : ""}`;
+    if (uiState.currentSinger) $("#singerDetailMeta").textContent = `${uiState.loadedSongCount} 首歌曲`;
     $("#more").classList.toggle("hidden", !data.hasMore);
     uiState.page = requestedPage + 1;
     // 预热下一页: 设备端会把它缓存下来, 用户点「更多」时基本瞬时。
@@ -318,7 +440,16 @@ async function search(reset = true) {
     }
   } catch (error) {
     // 被下一次搜索取消属于正常情况, 不弹提示。
-    if (error && error.name !== "AbortError") toast(error.message);
+    if (error && error.name !== "AbortError") {
+      if (reset) {
+        $("#results").innerHTML = uiState.currentSinger
+          ? '<div class="empty">歌曲加载失败<br><small>请检查电视连接后重试</small></div>'
+          : '<div class="empty">搜索失败，请检查连接后重试</div>';
+      }
+      $("#resultSummary").textContent = "连接异常，请重试";
+      if (uiState.currentSinger) $("#singerDetailMeta").textContent = "加载失败";
+      toast(error.message || "歌曲加载失败");
+    }
   } finally { uiState.busy = false; }
 }
 
@@ -391,8 +522,18 @@ async function loadFavorites() {
 }
 
 document.addEventListener("click", async (event) => {
+  const singerCard = event.target.closest(".singer-card[data-singer-id]");
+  if (singerCard) {
+    event.preventDefault();
+    openSingerDetail(singerCard.dataset.singerId, singerCard.dataset.singerName);
+    return;
+  }
   const button = event.target.closest("button");
   if (!button) return;
+  if (button.id === "singerBack") {
+    backToSingerList();
+    return;
+  }
   if (button.dataset.letter || button.dataset.letterAction) {
     const input = $("#query");
     const start = input.selectionStart ?? input.value.length;
@@ -430,13 +571,6 @@ document.addEventListener("click", async (event) => {
     uiState.singerGroup = button.dataset.singerGroup;
     $$("[data-singer-group]").forEach((item) => item.classList.toggle("active", item === button));
     loadSingers(true);
-  }
-  if (button.classList.contains("singer-select")) {
-    $("#query").value = button.dataset.singer || "";
-    uiState.searchMode = "singer";
-    uiState.resultMode = "songs";
-    $("#searchResultBlock").classList.add("hidden");
-    search(true);
   }
   if (button.dataset.searchMode) {
     uiState.searchMode = button.dataset.searchMode;
@@ -490,6 +624,15 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+document.addEventListener("keydown", (event) => {
+  const singerCard = event.target.closest?.(".singer-row[data-singer-card]");
+  if (!singerCard || event.target !== singerCard) return;
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    openSingerDetail(singerCard.dataset.singerId, singerCard.dataset.singerName);
+  }
+});
+
 $("#alphabetToggle")?.addEventListener("click", () => {
   const panel = $(".alphabet-panel");
   if (!panel) return;
@@ -502,7 +645,7 @@ $("#query")?.addEventListener("compositionend", () => {
   // 中文输入法候选词提交后保留文本，由用户主动点击搜索。
 });
 $("#searchForm").addEventListener("submit", (event) => { event.preventDefault(); uiState.searchMode === "singer" ? loadSingers(true) : search(); });
-$("#more").addEventListener("click", () => uiState.resultMode === "singers" ? loadSingers(false) : search(false));
+$("#more").addEventListener("click", () => uiState.resultMode === "singers" ? loadSingers(false) : uiState.resultMode === "singer-songs" ? loadSingerSongs(false) : search(false));
 $("#hotPrev").addEventListener("click", () => loadHot(uiState.hotPage - 1));
 $("#hotNext").addEventListener("click", () => loadHot(uiState.hotPage + 1));
 // 音乐音量可调; 麦克风音量由功放硬件控制, 不再向设备发送无效果请求。

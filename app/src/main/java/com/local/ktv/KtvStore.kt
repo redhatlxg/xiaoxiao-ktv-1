@@ -30,6 +30,7 @@ class KtvStore {
     @JvmField var marqueeText = "欢迎使用晓晓呀"
     @JvmField var playWhileDownloading = false
     @JvmField var clearDownloadsOnBoot = false
+    @JvmField var hardwareDecodeEnabled = false
     @JvmField var autoFullscreenSeconds = 30
     @JvmField var showUsbSongs = true
     @JvmField var autoDeleteSongs = true
@@ -86,6 +87,7 @@ class KtvStore {
             if (marqueeText == "欢迎使用麦动") marqueeText = "欢迎使用晓晓呀"
             playWhileDownloading = root.optBoolean("playWhileDownloading", false)
             clearDownloadsOnBoot = root.optBoolean("clearDownloadsOnBoot", false)
+            hardwareDecodeEnabled = root.optBoolean("hardwareDecodeEnabled", false)
             autoFullscreenSeconds = root.optInt("autoFullscreenSeconds", 30)
             showUsbSongs = root.optBoolean("showUsbSongs", true)
             autoDeleteSongs = root.optBoolean("autoDeleteSongs", true)
@@ -161,6 +163,7 @@ class KtvStore {
                 put("marqueeText", marqueeText)
                 put("playWhileDownloading", playWhileDownloading)
                 put("clearDownloadsOnBoot", clearDownloadsOnBoot)
+                put("hardwareDecodeEnabled", hardwareDecodeEnabled)
                 put("autoFullscreenSeconds", autoFullscreenSeconds)
                 put("showUsbSongs", showUsbSongs)
                 put("autoDeleteSongs", autoDeleteSongs)

@@ -61,7 +61,7 @@ class QuickSearchAdapter(
         gravity = Gravity.CENTER_HORIZONTAL
         isClickable = true
         isFocusable = true
-        val name = singer.getOrNull(1).orEmpty()
+        val name = singer.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() } ?: "歌手资料待完善"
         setAccessibleFocus("focus:singer:${singer.getOrNull(0) ?: name}", "歌星，$name")
         addView(ImageView(context).apply {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -72,12 +72,14 @@ class QuickSearchAdapter(
         }, LinearLayout.LayoutParams(dp(88), dp(88)).apply { topMargin = dp(5) })
         addView(TextView(context).apply {
             text = name
-            textSize = 15f
+            textSize = 16f
             setTextColor(Color.WHITE)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
-            isSingleLine = true
+            maxLines = 2
+            includeFontPadding = false
             ellipsize = TextUtils.TruncateAt.END
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(32)))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(39)))
         installPress(this)
         setOnClickListener { onSingerClick(singer) }
         TvFocusStyler.install(this)

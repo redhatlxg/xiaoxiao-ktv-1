@@ -10,12 +10,12 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
-/** Gitea Release based in-app updater. */
+/** Public download manifest based in-app updater. */
 object AppUpdateManager {
-    private const val LATEST_RELEASE_API =
-        "http://ck.ac19.cn:6699/api/v1/repos/admin/maidong-ktv/releases/latest"
-    private const val PUBLIC_GITEA_BASE = "http://ck.ac19.cn:6699"
+    private const val UPDATE_MANIFEST_URL =
+        "https://raw.githubusercontent.com/redhatlxg/xiaoxiao-ktv-download/main/latest.json"
 
     data class Release(
         val version: String,
@@ -23,39 +23,32 @@ object AppUpdateManager {
         val notes: String,
         val apkUrl: String,
         val apkName: String,
+        val sha256: String,
     )
 
     fun check(currentVersion: String, result: (Result<Release?>) -> Unit) {
         Thread({
             result(runCatching {
-                val json = getText(LATEST_RELEASE_API)
-                val root = JSONObject(json)
-                val version = root.optString("tag_name").trim().removePrefix("v")
-                val assets = root.optJSONArray("assets")
-                var apkUrl = ""
-                var apkName = ""
-                if (assets != null) {
-                    for (index in 0 until assets.length()) {
-                        val asset = assets.optJSONObject(index) ?: continue
-                        val name = asset.optString("name")
-                        val url = normalizeAssetUrl(asset.optString("browser_download_url"))
-                        if (name.endsWith(".apk", ignoreCase = true) || url.contains(".apk", ignoreCase = true)) {
-                            apkName = name.ifBlank { "maidong-ktv-$version.apk" }
-                            apkUrl = url
-                            break
-                        }
-                    }
-                }
-                if (version.isBlank() || apkUrl.isBlank() || compareVersions(version, currentVersion) <= 0) null
+                val root = JSONObject(getText(UPDATE_MANIFEST_URL))
+                if (!root.optBoolean("available", false)) return@runCatching null
+                val version = root.optString("version").trim().removePrefix("v")
+                val apkUrl = root.optString("apkUrl").trim()
+                val apkName = root.optString("apkName").ifBlank { "xiaoxiao-ktv-$version.apk" }
+                val sha256 = root.optString("sha256").trim().lowercase()
+                if (version.isBlank() || apkUrl.isBlank() ||
+                    !apkUrl.startsWith("https://") || !sha256.matches(Regex("[a-f0-9]{64}")) ||
+                    compareVersions(version, currentVersion) <= 0
+                ) null
                 else Release(
                     version = version,
-                    title = root.optString("name").ifBlank { "麦动 KTV $version" },
-                    notes = root.optString("body"),
+                    title = root.optString("title").ifBlank { "晓晓呀 KTV $version" },
+                    notes = root.optString("releaseNotes"),
                     apkUrl = apkUrl,
                     apkName = apkName,
+                    sha256 = sha256,
                 )
             })
-        }, "gitea-update-check").start()
+        }, "public-update-check").start()
     }
 
     fun download(
@@ -67,14 +60,14 @@ object AppUpdateManager {
         Thread({
             result(runCatching {
                 val directory = File(activity.externalCacheDir ?: activity.cacheDir, "updates").apply { mkdirs() }
-                val target = File(directory, "maidong-ktv-${release.version}.apk")
+                val target = File(directory, "xiaoxiao-ktv-${release.version}.apk")
                 val partial = File(directory, "${target.name}.download")
                 partial.delete()
                 val connection = (URL(release.apkUrl).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 15_000
                     readTimeout = 30_000
                     instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", "MaidongKTV/${BuildConfig.VERSION_NAME}")
+                    setRequestProperty("User-Agent", "XiaoxiaoKTV/${BuildConfig.VERSION_NAME}")
                 }
                 try {
                     require(connection.responseCode in 200..299) { "下载失败：HTTP ${connection.responseCode}" }
@@ -97,6 +90,17 @@ object AppUpdateManager {
                     connection.disconnect()
                 }
                 require(partial.length() > 1_000_000L) { "下载的安装包不完整" }
+                val actualSha256 = partial.inputStream().use { input ->
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    val buffer = ByteArray(128 * 1024)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        digest.update(buffer, 0, count)
+                    }
+                    digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+                }
+                require(actualSha256 == release.sha256) { "安装包校验失败，请重新下载" }
                 partial.inputStream().use { input ->
                     require(input.read() == 'P'.code && input.read() == 'K'.code) { "下载内容不是 APK" }
                 }
@@ -106,7 +110,7 @@ object AppUpdateManager {
                 require(partial.renameTo(target)) { "无法保存安装包" }
                 target
             })
-        }, "gitea-update-download").start()
+        }, "public-update-download").start()
     }
 
     /**
@@ -141,25 +145,13 @@ object AppUpdateManager {
         return 0
     }
 
-    /**
-     * Gitea 的 ROOT_URL 若配置为内网地址 (如 http://172.18.20.4:3000),
-     * 其 Release 附件的 browser_download_url 也是内网 IP, 外网设备不可达。
-     * 这里统一把私有网段地址重写到公网域名 (爱快端口映射 6699 -> 容器 3000),
-     * 使任意网络环境下的设备都能完成在线更新。
-     */
-    private fun normalizeAssetUrl(url: String): String {
-        if (url.isBlank()) return url
-        return Regex("http://(?:172\\.(?:1[6-9]|2[0-9]|3[01])|192\\.168|10)\\.\\d{1,3}\\.\\d{1,3}(?::\\d+)?")
-            .replace(url, PUBLIC_GITEA_BASE)
-    }
-
     private fun getText(url: String): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000
             readTimeout = 15_000
             instanceFollowRedirects = true
             setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "MaidongKTV/${BuildConfig.VERSION_NAME}")
+            setRequestProperty("User-Agent", "XiaoxiaoKTV/${BuildConfig.VERSION_NAME}")
         }
         return try {
             require(connection.responseCode == HttpURLConnection.HTTP_OK) {

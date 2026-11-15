@@ -235,6 +235,21 @@ class KtvJsBridge(context: Context) {
         }
     }
 
+    /** 下载服务端返回的媒体 URL 失败时，将最近命中的解析节点降级。 */
+    fun markLastSongSourceFailed() {
+        SongUrlResolver.markLastSourceFailed()
+        val view = webView ?: return
+        if (!ready || destroyed) return
+        mainHandler.post {
+            runCatching {
+                view.evaluateJavascript(
+                    "(function(){if(window.api && typeof window.api.markLastSourceFailed==='function'){return window.api.markLastSourceFailed()?'demoted':'no-source';}return 'no-source';})()",
+                    null,
+                )
+            }.onFailure { Log.w(TAG, "mark failed song source failed", it) }
+        }
+    }
+
     fun getSongUrl(
         musicNo: String,
         resolution: String,
@@ -265,8 +280,19 @@ class KtvJsBridge(context: Context) {
                   if (window.KtvApiConfig) {
                     window.KtvApiConfig.VER = '2.0';
                     window.KtvApiConfig.VN = '4.1.3.03281430';
+                    // 覆盖热更新脚本中的单节点配置，保证本地缓存/远端脚本都走同一组备用节点。
+                    window.KtvApiConfig.HOSTS = [
+                      'http://zk.ktv1.top:6677',
+                      'http://w.w345.my',
+                      'http://desktok.top',
+                      'http://mm.kk456.top',
+                      'http://w.w345.my:66',
+                      'http://z.w345.my',
+                      'http://b.sktv.top',
+                      'http://w345.my'
+                    ];
                   }
-                  window.api = new window.KtvApi({mac: ${JSONObject.quote(DEVICE_MAC)}, sn: ${JSONObject.quote(DEVICE_SN)}, maxDeviceRetries: 0, debug: true});
+                  window.api = new window.KtvApi({mac: ${JSONObject.quote(DEVICE_MAC)}, sn: ${JSONObject.quote(DEVICE_SN)}, hosts: window.KtvApiConfig.HOSTS, maxDeviceRetries: 0, debug: true});
                   var _regen = window.api.regenerateDevice;
                   window.api.regenerateDevice = function() {
                     _regen.call(window.api);

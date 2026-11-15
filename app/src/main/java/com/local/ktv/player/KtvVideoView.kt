@@ -5,6 +5,8 @@ import android.graphics.Color
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.AttributeSet
 import android.util.Log
 import android.view.Gravity
@@ -97,33 +99,19 @@ private class KtvSurfaceView(context: Context) : SurfaceView(context) {
         updateCropScale(w, h)
     }
 
-    /** Fill the KTV viewport with a centered crop when the source aspect differs. */
+    /** 播放区域始终铺满容器，不做中心裁切，避免把画面边缘的内嵌歌词切掉。 */
     private fun updateCropScale(width: Int, height: Int) {
-        if (width <= 0 || height <= 0 || videoWidth <= 0 || videoHeight <= 0) {
-            scaleX = 1f
-            scaleY = 1f
-            return
-        }
-        val viewportRatio = width.toFloat() / height.toFloat()
-        val sourceRatio = videoWidth.toFloat() / videoHeight.toFloat()
-        val zoom = maxOf(viewportRatio / sourceRatio, sourceRatio / viewportRatio)
-            .coerceIn(1f, 1.45f)
-        scaleX = zoom
-        scaleY = zoom
+        // 由 SurfaceView 将完整视频缓冲区映射到容器尺寸；不额外放大或裁切。
+        scaleX = 1f
+        scaleY = 1f
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val maxWidth = getDefaultSize(videoWidth, widthMeasureSpec).coerceAtLeast(1)
-        val maxHeight = getDefaultSize(videoHeight, heightMeasureSpec).coerceAtLeast(1)
-        // 保持麦动原版 scale mode 1 的行为: 画面拉伸铺满 16:9 画布并居中。
-        // 不要按片源真实比例缩放 —— 3:2/4:3 片源会在 16:9 窗口里产生黑边、画面变小。
-        var measuredWidth = maxWidth
-        var measuredHeight = measuredWidth * 9 / 16
-        if (measuredHeight > maxHeight) {
-            measuredHeight = maxHeight
-            measuredWidth = measuredHeight * 16 / 9
-        }
-        setMeasuredDimension(measuredWidth.coerceAtLeast(1), measuredHeight.coerceAtLeast(1))
+        // KTV 电视/横屏设备优先铺满可用播放区域。SurfaceView 保留完整缓冲区，
+        // 通过显示区域自适应缩放，不再按源视频比例缩小视图制造大面积黑边。
+        val measuredWidth = MeasureSpec.getSize(widthMeasureSpec).coerceAtLeast(1)
+        val measuredHeight = MeasureSpec.getSize(heightMeasureSpec).coerceAtLeast(1)
+        setMeasuredDimension(measuredWidth, measuredHeight)
     }
 }
 
@@ -143,6 +131,11 @@ class KtvPlaybackEngine(context: Context) {
     private var videoWidth = 0
     private var videoHeight = 0
     private var toneStep = 0
+    private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile private var hardwareDecodeEnabled = false
+    @Volatile private var softwareFallbackAttempted = false
+    @Volatile private var currentVideoUri: Uri? = null
+    @Volatile private var playbackRequestSerial = 0L
 
     val isPlaying: Boolean get() = runCatching { ijkPlayer?.isPlaying == true }.getOrDefault(false)
     val currentPosition: Int get() = runCatching {
@@ -191,26 +184,39 @@ class KtvPlaybackEngine(context: Context) {
         view.currentHolder().takeIf { it.surface?.isValid == true }?.let(::setOutputHolder)
     }
 
+    fun setHardwareDecodeEnabled(enabled: Boolean) {
+        hardwareDecodeEnabled = enabled
+        Log.i(TAG, "hardware decode preference=${if (enabled) "MediaCodec" else "FFmpeg software"}; applies to next MV")
+    }
+
     fun setVideoUri(uri: Uri) {
+        currentVideoUri = uri
+        playbackRequestSerial++
+        softwareFallbackAttempted = false
         prepared = false
         startWhenPrepared = false
-        Log.i(TAG, "setVideoUri uri=$uri surface=${targetView?.currentHolder()?.surface?.isValid == true}")
+        val requestHardwareDecode = hardwareDecodeEnabled
+        Log.i(
+            TAG,
+            "setVideoUri uri=$uri decoder=${if (requestHardwareDecode) "MediaCodec" else "FFmpeg"} " +
+                "surface=${targetView?.currentHolder()?.surface?.isValid == true}",
+        )
         val ijk = ensureIjkPlayer()
         if (ijk != null) {
-            val firstAttempt = runCatching { prepareIjkPlayer(ijk, uri) }
+            val firstAttempt = runCatching { prepareIjkPlayer(ijk, uri, requestHardwareDecode) }
             if (firstAttempt.isFailure) {
                 Log.e(TAG, "IJK prepare failed; recreating player", firstAttempt.exceptionOrNull())
                 releaseIjk()
                 val retry = ensureIjkPlayer()
-                val retryAttempt = retry?.let { runCatching { prepareIjkPlayer(it, uri) } }
+                val retryAttempt = retry?.let { runCatching { prepareIjkPlayer(it, uri, false) } }
                 if (retryAttempt == null || retryAttempt.isFailure) {
-                    Log.e(
-                        TAG,
-                        "IJK recreate failed; platform fallback is disabled",
-                        retryAttempt?.exceptionOrNull(),
-                    )
+                    Log.e(TAG, "IJK software-decoder retry failed", retryAttempt?.exceptionOrNull())
                     prepared = false
+                    releaseIjk()
                     errorListener?.onError(null, MediaPlayer.MEDIA_ERROR_UNKNOWN, 0)
+                } else {
+                    softwareFallbackAttempted = requestHardwareDecode
+                    Log.w(TAG, "synchronous decoder failure; resumed with IJK software decoder")
                 }
             }
         } else {
@@ -220,9 +226,9 @@ class KtvPlaybackEngine(context: Context) {
         }
     }
 
-    private fun prepareIjkPlayer(player: IjkMediaPlayer, uri: Uri) {
+    private fun prepareIjkPlayer(player: IjkMediaPlayer, uri: Uri, useHardwareDecode: Boolean) {
         player.reset()
-        configure(player)
+        configure(player, useHardwareDecode)
         targetView?.currentHolder()?.takeIf { it.surface?.isValid == true }?.let(player::setDisplay)
         val source = if (uri.scheme.equals("file", true)) uri.path.orEmpty() else uri.toString()
         Log.i(TAG, "prepare source=$source surface=${targetView?.currentHolder()?.surface?.isValid == true}")
@@ -255,6 +261,7 @@ class KtvPlaybackEngine(context: Context) {
     }
 
     fun stop() {
+        playbackRequestSerial++
         startWhenPrepared = false
         prepared = false
         runCatching { ijkPlayer?.stop() }
@@ -341,6 +348,7 @@ class KtvPlaybackEngine(context: Context) {
     }
 
     fun release() {
+        playbackRequestSerial++
         startWhenPrepared = false
         prepared = false
         releaseIjk()
@@ -363,7 +371,8 @@ class KtvPlaybackEngine(context: Context) {
             .getOrNull()
     }
 
-    private fun configure(player: IjkMediaPlayer) {
+    private fun configure(player: IjkMediaPlayer, useHardwareDecode: Boolean) {
+        val requestSerial = playbackRequestSerial
         player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 0L)
         player.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "skip_loop_filter", 48L)
         // The switch path seeks the newly opened audio stream back to the
@@ -379,12 +388,13 @@ class KtvPlaybackEngine(context: Context) {
         player.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "http-detect-range-support", 0L)
         player.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzemaxduration", 100L)
         player.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 1_048_576L)
-        // Old KTV MPEG-TS files corrupt reference frames in emulator/device OMX decoders.
-        // Keep the whole playback path on IJK's bundled FFmpeg decoder.
-        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 0L)
-        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-all-videos", 0L)
-        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 0L)
-        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 0L)
+        // MediaCodec is opt-in because some legacy KTV TS files trigger OEM OMX decoder artefacts.
+        // If hardware decoding fails at runtime, the error listener below retries this MV once in software.
+        val mediaCodecOption = if (useHardwareDecode) 1L else 0L
+        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", mediaCodecOption)
+        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-all-videos", mediaCodecOption)
+        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", mediaCodecOption)
+        player.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", mediaCodecOption)
         player.setAudioStreamType(AudioManager.STREAM_MUSIC)
         player.setScreenOnWhilePlaying(true)
         applyTone(player)
@@ -406,10 +416,41 @@ class KtvPlaybackEngine(context: Context) {
             targetView?.updateVideoSize(width, height)
         }
         player.setOnCompletionListener { completionListener?.onCompletion(null) }
-        player.setOnErrorListener { _, what, extra ->
-            prepared = false
-            Log.e(TAG, "onError what=$what extra=$extra")
-            errorListener?.onError(null, what, extra) ?: true
+        player.setOnErrorListener { failedPlayer, what, extra ->
+            if (requestSerial != playbackRequestSerial || failedPlayer !== ijkPlayer) {
+                true
+            } else {
+                prepared = false
+                Log.e(TAG, "onError what=$what extra=$extra hardware=$useHardwareDecode")
+                val failedUri = currentVideoUri
+                if (useHardwareDecode && failedUri != null && !softwareFallbackAttempted) {
+                    softwareFallbackAttempted = true
+                    val resumeAfterRetry = startWhenPrepared
+                    Log.w(TAG, "MediaCodec playback error; retrying current MV with software decoder")
+                    mainHandler.post {
+                        if (requestSerial != playbackRequestSerial || failedPlayer !== ijkPlayer) {
+                            return@post
+                        }
+                        releaseIjk()
+                        val softwarePlayer = ensureIjkPlayer()
+                        val softwareAttempt = softwarePlayer?.let {
+                            runCatching { prepareIjkPlayer(it, failedUri, false) }
+                        }
+                        if (softwareAttempt == null || softwareAttempt.isFailure) {
+                            Log.e(TAG, "software-decoder retry failed", softwareAttempt?.exceptionOrNull())
+                            prepared = false
+                            releaseIjk()
+                            errorListener?.onError(null, what, extra)
+                        } else {
+                            startWhenPrepared = resumeAfterRetry
+                            Log.i(TAG, "software-decoder retry accepted")
+                        }
+                    }
+                    true
+                } else {
+                    errorListener?.onError(null, what, extra) ?: true
+                }
+            }
         }
     }
 

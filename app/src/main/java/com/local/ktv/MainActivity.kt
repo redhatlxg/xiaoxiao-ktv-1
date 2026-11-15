@@ -247,6 +247,8 @@ class MainActivity : AppCompatActivity() {
     }
     private val visibleSongs: MutableList<Song> = ArrayList<Song>()
     private val visibleSingers: MutableList<Array<String?>?> = ArrayList<Array<String?>?>()
+    /** 歌星页在窄屏上改为单栏，避免左侧播放器/键盘挤占歌手列表。 */
+    private var singerBrowseLayout = false
     private val visiblePlaylists: MutableList<Array<String?>> = ArrayList()
     private val orderQueue: MutableList<Song>? = store.orderQueue
     private val sangHistory = store.sangHistory
@@ -312,7 +314,7 @@ class MainActivity : AppCompatActivity() {
     private var audioManager: AudioManager? = null
     private var recorder: MediaRecorder? = null
     /** 电视/投影等设备需 App 占用麦克风输入后才会启用麦克风声音输出(供演唱)。 */
-    private val micActivator = MicActivator()
+    private val micActivator = MicActivator(this)
     private var currentRecording: File? = null
     private var currentPage = "首页"
 
@@ -346,11 +348,13 @@ class MainActivity : AppCompatActivity() {
     /** 当前浏览模式的总页数  */
     private var browseTotalPages = 0
 
-    /** 原版一屏展示量：歌曲 2x5、歌手 4x2、排行榜 1x6。 */
+    /** 一屏展示量按实际列数计算：歌星保持两行、歌曲目录保持五行、排行榜单列六首。 */
+    // 歌手浏览改为一个歌手对应一个 ListView item，按固定条数分页。
     private fun browsePageSize(): Int = when (browseMode) {
         "rank" -> 6
         "singer_list" -> 8
-        else -> MuseDatabase.PAGE_SIZE
+        // 目录固定按 5 行铺满内容区；窄屏单列，宽屏双列。
+        else -> SongListAdapter.columnsForMode("catalog", resources.configuration.screenWidthDp) * 5
     }
 
     /** 当前浏览类型:"hot"/"language"/"wordcount"/"singer"/"search"  */
@@ -459,6 +463,90 @@ class MainActivity : AppCompatActivity() {
 
     private class LyricLine(val timeMs: Int, val text: String?)
 
+
+    /** Re-check at least once per minute so clock changes cannot keep an expired trial open. */
+    private fun scheduleTrialExpiryCheck() {
+        val remaining = OfflineLicense.trialRemainingMillis(this)
+        if (remaining <= 0L) {
+            showOfflineLicenseDialog()
+            return
+        }
+        main.postDelayed({
+            if (!isFinishing && !OfflineLicense.isActivated(this)) scheduleTrialExpiryCheck()
+        }, minOf(remaining, 60_000L))
+    }
+
+    /** Offline one-device activation. */
+    private fun showOfflineLicenseDialog(forceExit: Boolean = true) {
+        val machine = runCatching { OfflineLicense.machineCode(this) }
+            .getOrElse { "设备标识读取失败：\${it.message.orEmpty()}" }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(36, 12, 36, 4)
+        }
+        val info = TextView(this).apply {
+            text = "软件价格：69元（一次付费，永久使用）\\n授权方式：一机一码，仅限本设备使用。\\n授权提供方 QQ：1435051399\\n请联系提供方获取授权码，并发送下面的机器码。\\n\\n机器码：\\n$machine"
+            textSize = 17f
+            setTextIsSelectable(true)
+        }
+        val input = EditText(this).apply {
+            hint = "请粘贴收到的授权码"
+            minLines = 2
+            maxLines = 4
+            textSize = 14f
+        }
+        panel.addView(info)
+        panel.addView(input, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = 18 })
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("晓晓呀 KTV · 软件授权")
+            .setView(panel)
+            .setNeutralButton("复制机器码", null)
+            .setPositiveButton("激活软件", null)
+            .setNegativeButton(if (forceExit) "退出软件" else "关闭", null)
+            .create()
+        dialog.setCancelable(!forceExit)
+        dialog.setCanceledOnTouchOutside(!forceExit)
+        if (!forceExit) {
+            dialog.setOnShowListener {
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { dialog.dismiss() }
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("KTV机器码", machine))
+                    toast("机器码已复制")
+                }
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                    if (OfflineLicense.activate(this, input.text.toString())) {
+                        toast("授权成功")
+                        dialog.dismiss()
+                        showSettingsPage(false)
+                    } else toast("授权码无效，或不属于这台设备")
+                }
+            }
+            dialog.show()
+            return
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("KTV机器码", machine))
+                toast("机器码已复制")
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (OfflineLicense.activate(this, input.text.toString())) {
+                    toast("授权成功，正在进入软件")
+                    dialog.dismiss()
+                    recreate()
+                } else {
+                    toast("授权码无效，或不属于这台设备")
+                }
+            }
+        }
+        dialog.show()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         getWindow().getDecorView().setSystemUiVisibility(
@@ -472,9 +560,18 @@ class MainActivity : AppCompatActivity() {
         // 使用新的横屏TV布局
         setContentView(R.layout.activity_main)
         applyResponsiveLayout()
+        // Trial marker is stored in shared external storage, so ask for the app's
+        // existing storage permission before starting the one-day trial.
         if (!hasStoragePermission()) {
             requestStorage()
             return
+        }
+        if (!OfflineLicense.isActivated(this)) {
+            if (OfflineLicense.trialRemainingMillis(this) <= 0L) {
+                showOfflineLicenseDialog()
+                return
+            }
+            scheduleTrialExpiryCheck()
         }
         // 存储目录建不出来时**不再闪退**（极米 H1S / Android 5.1.1 的历史崩溃点），
         // AppPaths.init 已在 Application.attachBaseContext 里挑好可写根目录。
@@ -518,7 +615,9 @@ class MainActivity : AppCompatActivity() {
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager?
         // 初始化 API 客户端 (歌曲下载链接)
         init("abe235a87118f6de", "080027deed4f")
-        playbackEngine = KtvPlaybackEngine(applicationContext)
+        playbackEngine = KtvPlaybackEngine(applicationContext).also {
+            it.setHardwareDecodeEnabled(store.hardwareDecodeEnabled)
+        }
         // 远程日志系统(GlogCenter): 启动即上报设备/网络信息。
         MiliLog.init(applicationContext)
         // ⚠️ STORAGE 探测含真实建目录/写盘与 /proc/mounts 读取，**不能放在主线程**，
@@ -887,34 +986,54 @@ class MainActivity : AppCompatActivity() {
      * XML 保留电视端的大触控/遥控焦点尺寸；窄屏横屏设备在运行时切换紧凑尺寸。
      * 平板及电视继续使用原始布局，手机不会再因固定 370dp 左栏和顶部按钮而溢出。
      */
+    /**
+     * 首页按设备可用尺寸自适应。1280x720 仅作为设计比例基准，
+     * 所有实际尺寸均由当前 configuration 和 density 动态换算。
+     */
     private fun applyResponsiveLayout() {
         val config = resources.configuration
-        compactUi = config.screenWidthDp < 1000 || config.screenHeightDp < 600
-        if (!compactUi) return
-        val widthDp = config.screenWidthDp.coerceAtLeast(480)
-        val barHeight = dp(52)
+        val widthDp = config.screenWidthDp.coerceAtLeast(1)
+        val heightDp = config.screenHeightDp.coerceAtLeast(1)
+        val density = resources.displayMetrics.density.coerceAtLeast(0.1f)
+        val scale = (minOf(widthDp / 1280f, heightDp / 720f)).coerceIn(0.55f, 1.18f)
+        compactUi = widthDp < 1000 || heightDp < 600
+
+        // 子页面按真实可用宽度分配左右栏：窄屏给输入键盘留出可用宽度，
+        // 宽屏适度增加结果区，避免歌手卡片和歌曲标题被挤压。
+        updateSubPageColumns()
+
+        fun scaled(value: Float): Int = (value * scale * density).toInt().coerceAtLeast(1)
+        fun setSize(id: Int, width: Int? = null, height: Int? = null) {
+            findViewById<View?>(id)?.let { view ->
+                view.layoutParams = view.layoutParams.apply {
+                    if (width != null) this.width = scaled(width.toFloat())
+                    if (height != null) this.height = scaled(height.toFloat())
+                }
+            }
+        }
+
+        val barHeight = scaled(68f)
         findViewById<ViewGroup?>(R.id.top_bar)?.apply {
             layoutParams = layoutParams.apply { height = barHeight }
-            setPadding(dp(10), 0, dp(8), 0)
+            setPadding(scaled(28f), 0, scaled(18f), 0)
         }
         findViewById<ViewGroup?>(R.id.bottom_bar)?.apply {
             layoutParams = layoutParams.apply { height = barHeight }
-            setPadding(dp(10), 0, dp(10), 0)
+            setPadding(scaled(20f), 0, scaled(20f), 0)
         }
-        findViewById<View?>(R.id.text_logo)?.layoutParams =
-            findViewById<View>(R.id.text_logo).layoutParams.apply { width = dp(34); height = dp(34) }
-        findViewById<TextView?>(R.id.top_brand_name)?.apply { textSize = 16f }
-        if (widthDp < 760) {
-            findViewById<View?>(R.id.top_brand_name)?.visibility = View.GONE
-            findViewById<View?>(R.id.btn_top_search)?.visibility = View.GONE
-        }
+        setSize(R.id.text_logo, 184, 56)
+        findViewById<TextView?>(R.id.top_brand_name)?.textSize = 22f * scale
+        findViewById<TextView?>(R.id.top_brand_name)?.visibility = View.GONE
+        findViewById<View?>(R.id.btn_top_search)?.visibility =
+            if (widthDp < 620) View.GONE else View.VISIBLE
+
         listOf(
             R.id.btn_top_search, R.id.text_top_order_label, R.id.btn_top_vocal,
             R.id.btn_top_next, R.id.btn_top_pause, R.id.btn_top_replay, R.id.btn_top_tone,
         ).forEach { id ->
             findViewById<TextView?>(id)?.apply {
-                textSize = 11f
-                setPadding(dp(5), paddingTop, dp(6), paddingBottom)
+                textSize = (13f * scale).coerceAtLeast(9f)
+                setPadding(scaled(10f), paddingTop, scaled(12f), paddingBottom)
             }
         }
         findViewById<FrameLayout?>(R.id.content_frame)?.let { frame ->
@@ -924,35 +1043,95 @@ class MainActivity : AppCompatActivity() {
                 frame.layoutParams = this
             }
         }
-        findViewById<LinearLayout?>(R.id.main_layout)?.setPadding(dp(12), dp(10), dp(12), dp(8))
-        findViewById<LinearLayout?>(R.id.home_layout)?.apply {
-            setPadding(dp(14), dp(4), dp(14), dp(4))
-            (getChildAt(0)?.layoutParams as? LinearLayout.LayoutParams)?.let {
-                it.weight = 0.60f
-                getChildAt(0).layoutParams = it
-            }
-            (findViewById<View>(R.id.home_center_column).layoutParams as? LinearLayout.LayoutParams)?.let {
-                it.weight = 0.22f
-                findViewById<View>(R.id.home_center_column).layoutParams = it
-            }
-            (findViewById<View>(R.id.home_poster_container).layoutParams as? LinearLayout.LayoutParams)?.let {
-                it.weight = 0.20f
-                findViewById<View>(R.id.home_poster_container).layoutParams = it
-            }
+
+        findViewById<LinearLayout?>(R.id.main_layout)?.setPadding(
+            scaled(24f), scaled(14f), scaled(24f), scaled(14f)
+        )
+        findViewById<LinearLayout?>(R.id.keyboard_area)?.apply {
+            setPadding(scaled(8f), scaled(8f), scaled(8f), scaled(8f))
         }
-        findViewById<LinearLayout?>(R.id.left_column)?.let { left ->
-            val desiredWidthDp = (widthDp * 0.34f).toInt().coerceIn(230, 340)
-            left.layoutParams = left.layoutParams.apply { width = dp(desiredWidthDp) }
-            findViewById<View?>(R.id.player_container)?.layoutParams =
-                findViewById<View>(R.id.player_container).layoutParams.apply {
-                    height = dp((desiredWidthDp * 9f / 16f).toInt())
+        findViewById<View?>(R.id.search_input_row)?.layoutParams?.let {
+            it.height = scaled(44f)
+            findViewById<View>(R.id.search_input_row).layoutParams = it
+        }
+        findViewById<EditText?>(R.id.search_input)?.apply {
+            textSize = (16f * scale).coerceIn(12f, 20f)
+            setPadding(scaled(14f), paddingTop, scaled(10f), paddingBottom)
+        }
+        findViewById<TextView?>(R.id.key_backspace)?.apply {
+            layoutParams = layoutParams.apply { width = scaled(48f) }
+            textSize = (20f * scale).coerceIn(15f, 24f)
+        }
+        findViewById<TextView?>(R.id.key_clear)?.apply {
+            layoutParams = layoutParams.apply { width = scaled(42f) }
+            textSize = (20f * scale).coerceIn(15f, 24f)
+        }
+        findViewById<View?>(R.id.keyboard_mode_column)?.let {
+            it.layoutParams = it.layoutParams.apply { width = scaled(88f) }
+        }
+        listOf(R.id.key_abc, R.id.key_123, R.id.key_space).forEach { id ->
+            findViewById<TextView?>(id)?.apply {
+                layoutParams = layoutParams.apply {
+                    width = scaled(78f)
+                    height = scaled(40f)
                 }
+                textSize = (15f * scale).coerceIn(11f, 18f)
+            }
         }
+
+        findViewById<LinearLayout?>(R.id.home_layout)?.apply {
+            setPadding(scaled(18f), scaled(10f), scaled(18f), scaled(8f))
+            val top = findViewById<LinearLayout>(R.id.home_top_content)
+            val bottom = findViewById<LinearLayout>(R.id.home_bottom_cards_row)
+            (top.layoutParams as? LinearLayout.LayoutParams)?.let {
+                it.height = 0
+                it.weight = 0.77f
+                top.layoutParams = it
+            }
+            (bottom.layoutParams as? LinearLayout.LayoutParams)?.let {
+                it.height = 0
+                it.weight = 0.23f
+                it.topMargin = scaled(8f)
+                bottom.layoutParams = it
+            }
+        }
+
         listOf(
-            R.id.home_card_regular, R.id.home_card_favorite, R.id.home_card_category,
-            R.id.home_card_rank, R.id.home_card_song, R.id.home_card_singer, R.id.home_card_local,
+            R.id.home_card_song, R.id.home_card_singer, R.id.home_card_rank,
+            R.id.home_card_category, R.id.home_card_local, R.id.home_card_regular,
+            R.id.home_card_favorite,
         ).forEach { id ->
-            findViewById<TextView?>(id)?.apply { textSize = 15f; setPadding(dp(8), dp(8), dp(8), dp(8)) }
+            findViewById<TextView?>(id)?.apply {
+                textSize = (16f * scale).coerceAtLeast(11f)
+                setPadding(scaled(8f), scaled(6f), scaled(8f), scaled(6f))
+            }
+        }
+        findViewById<View?>(R.id.home_player_container)?.let {
+            (it.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                lp.marginEnd = scaled(8f)
+                it.layoutParams = lp
+            }
+        }
+        findViewById<View?>(R.id.home_center_column)?.let {
+            (it.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                lp.marginEnd = scaled(12f)
+                it.layoutParams = lp
+            }
+        }
+        findViewById<View?>(R.id.home_card_song)?.let {
+            (it.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                lp.bottomMargin = scaled(6f)
+                it.layoutParams = lp
+            }
+        }
+        findViewById<LinearLayout?>(R.id.home_bottom_cards_row)?.let { row ->
+            for (index in 0 until row.childCount) {
+                val child = row.getChildAt(index)
+                (child.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                    lp.marginEnd = if (index == row.childCount - 1) 0 else scaled(8f)
+                    child.layoutParams = lp
+                }
+            }
         }
     }
 
@@ -977,50 +1156,18 @@ class MainActivity : AppCompatActivity() {
     private var homeAspectSpacer: View? = null
 
     private fun applyHomePlayerAspect() {
+        if (homeLayout?.visibility != View.VISIBLE) return
+        val topRow = findViewById<LinearLayout?>(R.id.home_top_content) ?: return
         val host = findViewById<FrameLayout?>(R.id.home_player_container) ?: return
-        val column = host.parent as? LinearLayout ?: return
-        val row = column.parent as? LinearLayout ?: return
-        if (column.childCount < 2 || column.visibility != View.VISIBLE) return
-        if (column.width <= 0 || column.height <= 0 || row.width <= 0) return
-        val cards = column.getChildAt(column.childCount - 1)
-        val hostLp = host.layoutParams as? LinearLayout.LayoutParams ?: return
-        val colLp = column.layoutParams as? LinearLayout.LayoutParams ?: return
-        val gap = hostLp.bottomMargin.takeIf { it > 0 } ?: dp(8)
-        val cardsH = if (cards.visibility == View.GONE) 0 else cards.height
-        val availH = column.height - cardsH - gap
-        if (availH <= 0) return
-        val rowInner = row.width - row.paddingLeft - row.paddingRight
-        // MV 是首页主视觉：把可用宽度上限从 62% 提高到 70%，减少播放器显得过窄的问题。
-        // 中列和推荐列仍保留剩余空间，避免把分类入口挤没。
-        val capW = ((rowInner - colLp.leftMargin - colLp.rightMargin) * 0.68f).toInt()
-        val targetW = ((availH * 16f) / 9f).toInt().coerceIn(dp(120), capW.coerceAtLeast(dp(120)))
-        val targetH = ((targetW * 9f) / 16f).toInt()
-        val tolerance = dp(2)
-        if (colLp.weight != 0f || kotlin.math.abs(colLp.width - targetW) > tolerance) {
-            colLp.weight = 0f
-            colLp.width = targetW
-            column.layoutParams = colLp
-        }
-        if (hostLp.weight != 0f || kotlin.math.abs(hostLp.height - targetH) > tolerance) {
-            hostLp.weight = 0f
-            hostLp.height = targetH
-            host.layoutParams = hostLp
-        }
-        val spacerH = availH - targetH
-        val spacer = homeAspectSpacer
-        if (spacerH > tolerance) {
-            if (spacer == null) {
-                val created = Space(this)
-                column.addView(
-                    created,
-                    column.indexOfChild(cards),
-                    LinearLayout.LayoutParams(0, 0, 1f),
-                )
-                homeAspectSpacer = created
-            }
-        } else if (spacer != null) {
-            column.removeView(spacer)
-            homeAspectSpacer = null
+        if (topRow.width <= 0 || topRow.height <= 0) return
+
+        // The home screen uses three weighted columns:
+        // left shortcut rail (1.12), MV player (3.35), and poster rail (1.22).
+        // Preserve the XML weights; never resize topRow through the child's parent.
+        val playerParams = host.layoutParams as? LinearLayout.LayoutParams ?: return
+        if (playerParams.width != 0) {
+            playerParams.width = 0
+            host.layoutParams = playerParams
         }
     }
 
@@ -1031,13 +1178,48 @@ class MainActivity : AppCompatActivity() {
         column.viewTreeObserver.addOnGlobalLayoutListener(
             object : ViewTreeObserver.OnGlobalLayoutListener {
                 override fun onGlobalLayout() {
-                    runCatching { applyHomePlayerAspect() }
-                        .onFailure { Log.w(TAG, "home player aspect failed", it) }
-                    runCatching { applyHomeBottomCardsScale() }
-                        .onFailure { Log.w(TAG, "home bottom cards scale failed", it) }
+                    runCatching {
+                        applyHomePlayerAspect()
+                        applyHomePrimaryCardsScale()
+                        applyHomeBottomCardsScale()
+                    }.onFailure { Log.w(TAG, "home card scaling failed", it) }
                 }
             },
         )
+    }
+
+    /**
+     * 首页主入口三卡：按卡片实际高度等比缩放插画，与底部彩色卡保持一致。
+     * 插画固定在右侧，标题垂直居中；通过复用 Drawable bounds 避免布局监听反复触发重排。
+     */
+    private fun applyHomePrimaryCardsScale() {
+        val artwork = mapOf(
+            R.id.home_card_song to R.drawable.home_art_song,
+            R.id.home_card_singer to R.drawable.home_art_singer,
+            R.id.home_card_rank to R.drawable.home_art_rank,
+        )
+        artwork.forEach { (viewId, artRes) ->
+            val card = findViewById<TextView?>(viewId) ?: return@forEach
+            if (card.height <= 0) return@forEach
+            val artSize = (card.height * 0.56f).toInt().coerceAtLeast(dp(28)).coerceAtMost(dp(48))
+            val current = card.compoundDrawablesRelative[2]
+            if (current == null || current.bounds.width() != artSize || current.bounds.height() != artSize) {
+                val art = AppCompatResources.getDrawable(this, artRes)?.mutate() ?: return@forEach
+                art.setBounds(0, 0, artSize, artSize)
+                card.setCompoundDrawablesRelative(null, null, art, null)
+            }
+            val titleGravity = Gravity.CENTER_VERTICAL or Gravity.START
+            if (card.gravity != titleGravity) card.gravity = titleGravity
+            if (card.compoundDrawablePadding != dp(7)) card.compoundDrawablePadding = dp(7)
+            if (card.paddingLeft != dp(12) || card.paddingTop != dp(6) ||
+                card.paddingRight != dp(10) || card.paddingBottom != dp(6)) {
+                card.setPadding(dp(12), dp(6), dp(10), dp(6))
+            }
+            val scaledText = (card.height / resources.displayMetrics.density * 0.22f).coerceIn(14f, 19f)
+            if (kotlin.math.abs(card.textSize / resources.displayMetrics.scaledDensity - scaledText) > 0.5f) {
+                card.textSize = scaledText
+            }
+        }
     }
 
     /**
@@ -1097,8 +1279,8 @@ class MainActivity : AppCompatActivity() {
         navButtons.clear()
         addNav("🏠 主页", View.OnClickListener { v: View? -> showHome() })
         addNav("🎵 点歌", View.OnClickListener { v: View? -> showSongs("全部") })
-        addNav("🎤 歌星", View.OnClickListener { v: View? -> showSingers() })
-        addNav("🏆 排行榜", View.OnClickListener { v: View? -> showRank() })
+        addNav("🎤 歌星", View.OnClickListener { v: View? -> loadSingers() })
+        addNav("🏆 排行榜", View.OnClickListener { v: View? -> loadHotSongs() })
         addNav("🌐 语种", View.OnClickListener { v: View? -> showLanguages() })
         addNav("🔢 字数", View.OnClickListener { v: View? -> showWordCounts() })
         addNav("⭐ 收藏", View.OnClickListener { v: View? -> showFavorites() })
@@ -1198,8 +1380,8 @@ class MainActivity : AppCompatActivity() {
             "新歌推荐",
             "网络/本地新增歌曲",
             View.OnClickListener { v: View? -> showSongs("全部") })
-        addTile(grid, "热门排行", "按点播热度排序", View.OnClickListener { v: View? -> showRank() })
-        addTile(grid, "歌星点歌", "按歌手查找", View.OnClickListener { v: View? -> showSingers() })
+        addTile(grid, "热门排行", "按点播热度排序", View.OnClickListener { v: View? -> loadHotSongs() })
+        addTile(grid, "歌星点歌", "按歌手查找", View.OnClickListener { v: View? -> loadSingers() })
         addTile(
             grid,
             "语种点歌",
@@ -1749,56 +1931,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showRank() {
-        setPage("排行")
-        content!!.removeAllViews()
-        val panel = panel()
-        content!!.addView(panel, LinearLayout.LayoutParams(-1, -1))
-        panel.addView(sectionTitle("热门排行"))
-        // 分页控制栏
-        val pageBar = LinearLayout(this)
-        pageBar.setGravity(Gravity.CENTER_VERTICAL)
-        pageBar.addView(
-            button("上一页", View.OnClickListener { v: View? -> prevPage() }),
-            LinearLayout.LayoutParams(dp(110), dp(44))
-        )
-        pageInfo = label("", 14, GOLD)
-        pageInfo!!.setGravity(Gravity.CENTER)
-        pageBar.addView(pageInfo, LinearLayout.LayoutParams(0, dp(44), 1f))
-        pageBar.addView(
-            button("下一页", View.OnClickListener { v: View? -> nextPage() }),
-            LinearLayout.LayoutParams(dp(110), dp(44))
-        )
-        panel.addView(pageBar)
-        songList = listView()
-        songAdapter = tvAdapter()
-        songList!!.setAdapter(songAdapter)
-        songList!!.setOnItemClickListener(OnItemClickListener { p: AdapterView<*>?, v: View?, pos: Int, id: Long ->
-            handleSong(
-                visibleSongs.get(pos)
-            )
-        })
-        songList!!.setOnItemLongClickListener(OnItemLongClickListener { p: AdapterView<*>?, v: View?, pos: Int, id: Long ->
-            showSongActions(visibleSongs.get(pos))
-            true
-        })
-        panel.addView(songList, LinearLayout.LayoutParams(-1, 0, 1f))
-        if (library.muse.isAvailable()) {
-            browseMode = "hot"
-            browseParam = ""
-            browsePage = 0
-            loadBrowsePage()
-        } else {
-            visibleSongs.clear()
-            for (song in library.allSongs()) {
-                if (isVisibleSong(song)) visibleSongs.add(song)
-            }
-            Collections.sort<Song?>(
-                visibleSongs,
-                Comparator { a: Song?, b: Song? -> Integer.compare(b!!.playCount, a!!.playCount) })
-            renderSongs()
-        }
-    }
+
 
     private fun showQueue() {
         setPage("已点")
@@ -2099,7 +2232,7 @@ class MainActivity : AppCompatActivity() {
                     v.setMinHeight(dp(44))
                     v.setGravity(Gravity.CENTER_VERTICAL)
                     v.setPadding(dp(16), dp(10), dp(16), dp(10))
-                    v.setTextColor(Color.rgb(225, 225, 245))
+                    v.setTextColor(Color.rgb(244, 241, 235))
                     return v
                 }
             }
@@ -2228,18 +2361,9 @@ class MainActivity : AppCompatActivity() {
             }
 
             7 -> {
-                // 关于
+                // 关于页面仅展示制作方信息，不保留旧框架/内核介绍。
                 addSettingsTitle(content, "关于")
-                addSettingsItem(content, "应用名称", "晓晓呀", null)
-                addSettingsItem(content, "框架来源", "杨家三郎/麦动KTV", null)
-                addSettingsItem(content, "内核", "由 DSH 重构数据库源", null)
-                addSettingsItem(content, "版本号", BuildConfig.VERSION_NAME, null)
-                addSettingsItem(
-                    content,
-                    "曲库",
-                    if (library.muse.isAvailable()) "已加载 (" + library.muse.songCount() + " 首)" else "未加载",
-                    null
-                )
+                addSettingsItem(content, "作者", "晓晓呀 KTV", null)
             }
         }
     }
@@ -2249,7 +2373,7 @@ class MainActivity : AppCompatActivity() {
         val tv = TextView(this)
         tv.setText(title)
         tv.setTextSize(17f)
-        tv.setTextColor(Color.rgb(0x27, 0xCC, 0xA4))
+        tv.setTextColor(Color.rgb(235, 76, 94))
         tv.setTextSize(17f)
         tv.setPadding(dp(8), dp(8), dp(8), dp(12))
         tv.setTypeface(null, Typeface.BOLD)
@@ -2282,7 +2406,7 @@ class MainActivity : AppCompatActivity() {
         val l = TextView(this)
         l.setText(label)
         l.setTextSize(15f)
-        l.setTextColor(Color.rgb(225, 225, 245))
+        l.setTextColor(Color.rgb(244, 241, 235))
         row.addView(l, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         val r = TextView(this)
         r.setText(value)
@@ -2327,7 +2451,7 @@ class MainActivity : AppCompatActivity() {
         val l = TextView(this)
         l.setText(title)
         l.setTextSize(15f)
-        l.setTextColor(Color.rgb(225, 225, 245))
+        l.setTextColor(Color.rgb(244, 241, 235))
         row.addView(
             l,
             LinearLayout.LayoutParams(
@@ -2477,7 +2601,7 @@ class MainActivity : AppCompatActivity() {
         header.setPadding(dp(12), dp(4), dp(12), dp(4))
         header.setBackgroundColor(Color.TRANSPARENT)
         val logo = ImageView(this)
-        logo.setImageResource(R.drawable.ktv_logo)
+        logo.setImageResource(R.drawable.ktv_brand_icon)
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER)
         header.addView(logo, LinearLayout.LayoutParams(dp(42), dp(42)))
         val song = label(currentAndNextText(), 18, Color.WHITE)
@@ -2940,7 +3064,7 @@ class MainActivity : AppCompatActivity() {
         lateinit var eqArea: LinearLayout
         fun renderEqEnabled() {
             eqSwitch.text = if (KtvEqualizer.enabled) "均衡器：开启" else "均衡器：关闭"
-            eqSwitch.setTextColor(if (KtvEqualizer.enabled) Color.rgb(39, 204, 164) else Color.WHITE)
+            eqSwitch.setTextColor(if (KtvEqualizer.enabled) Color.rgb(235, 76, 94) else Color.WHITE)
             // 关闭时预设/频段整体降透明度，直观表达"当前不生效"。
             eqArea.alpha = if (KtvEqualizer.enabled) 1f else 0.45f
         }
@@ -3010,7 +3134,7 @@ class MainActivity : AppCompatActivity() {
                 caption(
                     bandLabels.getOrElse(index) { "${index + 1}" } + "Hz",
                     if (compact) 12 else 13,
-                    Color.rgb(206, 200, 238),
+                    Color.rgb(217, 197, 157),
                 ),
                 LinearLayout.LayoutParams(dp(62), -1),
             )
@@ -3509,7 +3633,7 @@ class MainActivity : AppCompatActivity() {
         val confirm = TextView(this).apply {
             text = "确 定"
             textSize = if (compact) 13f else 15f
-            setTextColor(Color.rgb(59, 18, 92))
+            setTextColor(Color.rgb(255, 255, 255))
             gravity = Gravity.CENTER
             isClickable = true
             isFocusable = true
@@ -3550,68 +3674,94 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateMobileQrOverlay() {
-        // 二维码固定嵌入首页 MV 播放窗口右上角，不再漂浮在屏幕右下角。
-        val container = findViewById<FrameLayout?>(R.id.home_player_container) ?: return
+        // 二维码属于播放器图层，而不是首页某个固定控件：视频在首页/歌手页/歌曲页移动时，
+        // applyPlayerBounds() 会用同一组视频边界同步移动二维码。
+        val root = playerLayerRoot ?: return
         mobileQrOverlay?.let { old -> (old.parent as? ViewGroup)?.removeView(old) }
         mobileQrOverlay = null
-        if (prefs()?.getBoolean(KEY_SHOW_MOBILE_QR, true) != true) return
+        if (prefs()?.getBoolean(KEY_SHOW_MOBILE_QR, true) == false) return
         val url = remoteUrl()
         if (url.isBlank()) return
-        val qrSize = dp(if (compactUi) 112 else 144)
-        val panelWidth = dp(if (compactUi) 142 else 178)
+
+        val previewSize = dp(144)
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(8), dp(8), dp(8), dp(7))
+            setPadding(dp(5), dp(5), dp(5), dp(5))
+            contentDescription = "微信扫码点歌"
+            isClickable = true
+            isFocusable = false
             background = GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(Color.rgb(255, 255, 255), Color.rgb(239, 243, 255))
+                intArrayOf(Color.rgb(255, 255, 255), Color.rgb(244, 237, 255))
             ).apply {
-                cornerRadius = dp(16).toFloat()
-                setStroke(dp(1), Color.rgb(196, 207, 245))
+                cornerRadius = dp(9).toFloat()
+                setStroke(dp(2), Color.rgb(133, 94, 255))
             }
-            UiCompat.setElevation(this, dp(14).toFloat())
-            addView(TextView(this@MainActivity).apply {
-                text = "手机扫码点歌"
-                textSize = if (compactUi) 11f else 13f
-                typeface = Typeface.DEFAULT_BOLD
-                gravity = Gravity.CENTER
-                setTextColor(Color.rgb(48, 54, 112))
-                includeFontPadding = false
-            }, LinearLayout.LayoutParams(-1, dp(if (compactUi) 20 else 23)))
+            // 高于播放器透明触摸层，但仅二维码卡片区域拦截点击。
+            UiCompat.setElevation(this, dp(16).toFloat())
             addView(ImageView(this@MainActivity).apply {
-                setImageBitmap(qrBitmap(url, qrSize))
-                contentDescription = "手机点歌二维码，扫码进入点歌大厅"
+                setImageBitmap(qrBitmap(url, previewSize))
+                contentDescription = "手机点歌二维码"
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 setBackgroundColor(Color.WHITE)
-            }, LinearLayout.LayoutParams(qrSize, qrSize).apply {
-                topMargin = dp(4)
-                bottomMargin = dp(4)
-            })
+            }, LinearLayout.LayoutParams(previewSize, previewSize))
             addView(TextView(this@MainActivity).apply {
-                text = "微信 / 浏览器扫一扫"
-                textSize = if (compactUi) 8f else 9f
+                text = "微信点歌"
+                textSize = if (compactUi) 10f else 12f
+                typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
-                setTextColor(Color.rgb(77, 91, 139))
+                setTextColor(Color.rgb(42, 28, 90))
                 includeFontPadding = false
-            }, LinearLayout.LayoutParams(-1, dp(if (compactUi) 14 else 16)))
-            addView(TextView(this@MainActivity).apply {
-                text = "手机与电视连接同一 Wi-Fi"
-                textSize = if (compactUi) 7f else 8f
-                gravity = Gravity.CENTER
-                setTextColor(Color.rgb(116, 126, 157))
-                includeFontPadding = false
-            }, LinearLayout.LayoutParams(-1, dp(if (compactUi) 13 else 15)))
+            }, LinearLayout.LayoutParams(-1, dp(if (compactUi) 19 else 22)))
             setOnClickListener { showMobileRemoteDialog() }
         }
-        val params = FrameLayout.LayoutParams(panelWidth, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.TOP).apply {
-            rightMargin = dp(10)
-            topMargin = dp(10)
-        }
-        container.addView(box, params)
-        box.bringToFront()
+        root.addView(
+            box,
+            FrameLayout.LayoutParams(dp(100), ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
         TvFocusStyler.suppressFill(box)
         mobileQrOverlay = box
+        updateMobileQrOverlayBounds()
+    }
+
+    /** 将二维码精确贴合当前视频矩形右上角，随播放器在主页与各点歌子页之间切换。 */
+    private fun updateMobileQrOverlayBounds() {
+        val box = mobileQrOverlay ?: return
+        val video = player ?: return
+        val videoParams = video.layoutParams as? FrameLayout.LayoutParams ?: return
+        val videoWidth = videoParams.width.takeIf { it > 0 } ?: return
+        val videoHeight = videoParams.height.takeIf { it > 0 } ?: return
+        if (isFullScreen || prefs()?.getBoolean(KEY_SHOW_MOBILE_QR, true) == false) {
+            box.visibility = View.GONE
+            return
+        }
+        if (videoWidth < dp(90) || videoHeight < dp(90)) {
+            box.visibility = View.GONE
+            return
+        }
+
+        // 尺寸按当前 MV 窗口缩放：约占视频宽度的 21%，比例与参考图一致。
+        val availableWidth = (videoWidth - dp(12)).coerceAtLeast(dp(52))
+        val panelWidth = min(dp(if (compactUi) 124 else 144), max(dp(64), (videoWidth * 0.21f).toInt()))
+            .coerceAtMost(availableWidth)
+        val qrSide = min(panelWidth - dp(10), (videoHeight * 0.34f).toInt())
+            .coerceAtLeast(dp(42))
+        val image = ((box as? ViewGroup)?.getChildAt(0) as? ImageView) ?: return
+        image.layoutParams = (image.layoutParams as LinearLayout.LayoutParams).apply {
+            width = qrSide
+            height = qrSide
+        }
+        val params = (box.layoutParams as? FrameLayout.LayoutParams)
+            ?: FrameLayout.LayoutParams(panelWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
+        params.width = panelWidth
+        params.height = ViewGroup.LayoutParams.WRAP_CONTENT
+        params.gravity = Gravity.TOP or Gravity.START
+        params.leftMargin = videoParams.leftMargin + videoWidth - panelWidth - dp(9)
+        params.topMargin = videoParams.topMargin + dp(9)
+        box.layoutParams = params
+        box.visibility = View.VISIBLE
+        box.bringToFront()
     }
 
     /** 全屏播放时固定显示在右上角的微信扫码点歌入口，控制栏收起后仍保留。 */
@@ -3628,7 +3778,13 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(dp(4), dp(4), dp(4), dp(3))
-            setBackgroundColor(Color.argb(218, 255, 255, 255))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.rgb(255, 255, 255), Color.rgb(255, 242, 244))
+            ).apply {
+                cornerRadius = dp(10).toFloat()
+                setStroke(dp(1), Color.rgb(225, 92, 108))
+            }
             UiCompat.setElevation(this, dp(12).toFloat())
             addView(ImageView(this@MainActivity).apply {
                 setImageBitmap(qrBitmap(url, qrSize))
@@ -3638,13 +3794,14 @@ class MainActivity : AppCompatActivity() {
                 text = "微信扫码点歌"
                 textSize = if (compactUi) 9f else 10f
                 gravity = Gravity.CENTER
-                setTextColor(Color.rgb(59, 18, 92))
+                setTextColor(Color.rgb(38, 43, 54))
                 includeFontPadding = false
             }, LinearLayout.LayoutParams(-1, dp(if (compactUi) 16 else 18)))
             setOnClickListener { showMobileRemoteDialog() }
         }
         val params = FrameLayout.LayoutParams(totalWidth, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.TOP).apply {
-            topMargin = dp(8)
+            // 全屏二维码从顶部功能区下方开始，始终不盖住控制按钮。
+            topMargin = chromeBarHeight() + dp(10)
             rightMargin = dp(10)
         }
         container.addView(box, params)
@@ -3660,7 +3817,7 @@ class MainActivity : AppCompatActivity() {
         val enabled = prefs()?.getBoolean(KEY_SHOW_MOBILE_QR, true) != false
         AlertDialog.Builder(this)
             .setTitle("手机点歌")
-            .setSingleChoiceItems(arrayOf("固定在 MV 右上角显示", "仅通过扫码点歌入口显示"), if (enabled) 0 else 1) { dialog, which ->
+            .setSingleChoiceItems(arrayOf("二维码跟随 MV 右上角显示", "仅通过扫码点歌入口显示"), if (enabled) 0 else 1) { dialog, which ->
                 prefs()?.edit()?.putBoolean(KEY_SHOW_MOBILE_QR, which == 0)?.apply()
                 updateMobileQrOverlay()
                 dialog.dismiss()
@@ -4125,6 +4282,10 @@ class MainActivity : AppCompatActivity() {
                 method == "GET" && path == "/api/v1/songs" -> remoteOk(remoteSearchJson(query))
                 method == "GET" && path == "/api/v1/categories" -> remoteOk(remoteCategoriesJson())
                 method == "GET" && path == "/api/v1/singers" -> remoteOk(remoteSingersJson(query))
+                method == "GET" && path.startsWith("/api/v1/singers/") && path.endsWith("/songs") -> {
+                    val singerId = URLDecoder.decode(path.removePrefix("/api/v1/singers/").removeSuffix("/songs").trimEnd('/'), "UTF-8")
+                    remoteOk(remoteSingerSongsJson(singerId, query))
+                }
                 method == "GET" && path == "/api/v1/hot" -> remoteOk(remoteHotJson(query))
                 method == "GET" && path == "/api/v1/queue" -> remoteOnMain { remoteOk(remoteQueueJson()) }
                 method == "GET" && path == "/api/v1/favorites" -> remoteFavorites()
@@ -4295,6 +4456,54 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 手机端歌手分类列表：复用正式曲库 singers 表的 area/type 字段，不猜测歌手归属。 */
+    /**
+     * 手机端歌手详情专用接口：必须按歌手主键查询，不能再用歌手姓名做模糊搜索。
+     * 关联表不完整的旧曲库由 MuseDatabase 内部按歌手名称回退。
+     */
+    private fun remoteSingerSongsJson(singerId: String, query: Map<String, String>): JSONObject {
+        require(singerId.isNotBlank()) { "歌手编号不能为空" }
+        val page = (query["page"]?.toIntOrNull() ?: 1).coerceAtLeast(1)
+        val pageSize = (query["pageSize"]?.toIntOrNull() ?: 20).coerceIn(1, 50)
+        val offset = (page - 1) * pageSize
+        val cacheKey = "singer-id|$singerId|$page|$pageSize"
+        remoteSearchCache[cacheKey]?.let { (json, at) ->
+            if (System.currentTimeMillis() - at < SEARCH_CACHE_TTL_MS) {
+                runCatching { JSONObject(json) }.getOrNull()?.let { return it }
+            }
+        }
+        val singerName = if (library.muse.isAvailable()) library.muse.singerNameById(singerId).orEmpty() else ""
+        val songs: MutableList<Song>
+        val total: Int
+        if (library.muse.isAvailable()) {
+            var exactSongs = library.muse.songsBySinger(singerId, offset, pageSize + 1)
+            var exactTotal = library.muse.countSongsBySinger(singerId)
+            if (exactSongs.isEmpty() && singerName.isNotBlank()) {
+                exactSongs = library.muse.songsBySingerName(singerName, offset, pageSize + 1)
+                exactTotal = library.muse.countSongsBySingerName(singerName)
+            }
+            songs = exactSongs
+            total = exactTotal.coerceAtLeast(exactSongs.size)
+        } else {
+            val matched = library.allSongs().filter { song ->
+                isVisibleSong(song) && singerName.isNotBlank() &&
+                    song.singer.orEmpty().split(Regex("[、,，/&；;]")).any { it.trim().equals(singerName, true) }
+            }
+            songs = matched.drop(offset).take(pageSize + 1).toMutableList()
+            total = matched.size
+        }
+        val hasMore = songs.size > pageSize
+        val rows = JSONArray()
+        songs.take(pageSize).forEach { song ->
+            cacheRemoteSong(song)
+            rows.put(songJson(song))
+        }
+        val payload = JSONObject().put("ok", true).put("singerId", singerId)
+            .put("singerName", singerName).put("songs", rows).put("total", total)
+            .put("page", page).put("pageSize", pageSize).put("hasMore", hasMore)
+        remoteSearchCache[cacheKey] = payload.toString() to System.currentTimeMillis()
+        return payload
+    }
+
     private fun remoteSingersJson(query: Map<String, String>): JSONObject {
         val group = query["group"].orEmpty().lowercase(Locale.ROOT)
         val area: String? = when (group) {
@@ -4587,8 +4796,20 @@ class MainActivity : AppCompatActivity() {
             }
             return bitmap
         } catch (e: Exception) {
+            // 生成失败时绝不能返回纯白方块冒充二维码；用醒目的红色叉号明确标记不可扫描。
             val fallback = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
             fallback.eraseColor(Color.WHITE)
+            val border = (size / 24).coerceAtLeast(2)
+            val stroke = (size / 12).coerceAtLeast(3)
+            val red = Color.rgb(217, 54, 72)
+            for (y in 0 until size) {
+                for (x in 0 until size) {
+                    val onBorder = x < border || y < border || x >= size - border || y >= size - border
+                    val onCross = kotlin.math.abs(x - y) <= stroke ||
+                        kotlin.math.abs((size - 1 - x) - y) <= stroke
+                    if (onBorder || onCross) fallback.setPixel(x, y, red)
+                }
+            }
             return fallback
         }
     }
@@ -4829,7 +5050,7 @@ class MainActivity : AppCompatActivity() {
         if ("点歌台" == tool) showSongs("全部")
         else if ("语种点歌" == tool) showLanguages()
         else if ("字数点歌" == tool) showWordCounts()
-        else if ("歌星分类" == tool) showSingers()
+        else if ("歌星分类" == tool) loadSingers()
         else if ("下载管理" == tool) showDownloads()
         else if ("U盘加歌" == tool) showUdisk()
         else if ("用户影片" == tool) showLocalMovies()
@@ -6745,7 +6966,7 @@ class MainActivity : AppCompatActivity() {
         actions.addView(action(
             if (isFavorite) R.drawable.ott_ic_favorite_cancel else R.drawable.ott_ic_favorite,
             if (isFavorite) "取消收藏" else "收藏",
-            if (isFavorite) Color.rgb(233, 30, 99) else null,
+            if (isFavorite) Color.rgb(217, 47, 67) else null,
         ) {
             val added = store.toggleFavorite(song)
             saveState()
@@ -7061,7 +7282,7 @@ class MainActivity : AppCompatActivity() {
         tile.setOnClickListener(listener)
         tile.setOnFocusChangeListener(OnFocusChangeListener { v: View?, hasFocus: Boolean ->
             if (hasFocus) {
-                // 焦点态:青绿色圆角 + 白色描边
+                // 焦点态:酒红圆角 + 白色描边
                 v!!.setBackground(roundedBg(FOCUS, 8, Color.argb(180, 255, 255, 255), 2))
                 tile.setTextColor(Color.rgb(8, 12, 18))
             } else {
@@ -7087,7 +7308,7 @@ class MainActivity : AppCompatActivity() {
         layout.setOrientation(LinearLayout.VERTICAL)
         layout.setPadding(dp(12), dp(12), dp(12), dp(12))
         // 圆角面板背景
-        layout.setBackground(roundedBg(PANEL, 6, 0, 0))
+        layout.setBackground(roundedBg(PANEL, 10, Color.argb(42, 231, 189, 112), 1))
         return layout
     }
 
@@ -7268,7 +7489,16 @@ class MainActivity : AppCompatActivity() {
     /** 子页面二级分类滚动容器(语种筛选)  */
     private var subCategoryScroll: HorizontalScrollView? = null
     private var keyboardArea: View? = null
-    private var rankCategoryGrid: GridLayout? = null
+    private var rankPageHeader: View? = null
+    private var rankPageTitle: TextView? = null
+    private var rankPageSubtitle: TextView? = null
+    private var rankCategoryScroll: HorizontalScrollView? = null
+    private var rankCategoryGrid: LinearLayout? = null
+    private var rankSpotlightCard: View? = null
+    private var rankSpotlightLabel: TextView? = null
+    private var rankSpotlightIcon: ImageView? = null
+    private var rankSpotlightSong: TextView? = null
+    private var rankSpotlightSinger: TextView? = null
     private var paginationBar: View? = null
     private var fullScreenContainer: FrameLayout? = null
     private var isFullScreen = false
@@ -7317,8 +7547,9 @@ class MainActivity : AppCompatActivity() {
     /** 当前分类列表  */
     private val currentCategories: MutableList<String> = ArrayList<String>()
 
-    /** 排行榜显示名对应的数据库 playlist id，索引与 currentCategories 一致。 */
+    /** 榜单名称、数据库 ID、歌曲数量使用同一索引，保证切换榜单时始终指向同一数据源。 */
     private val rankPlaylistIds: MutableList<String> = ArrayList<String>()
+    private val rankPlaylistCounts: MutableList<Int> = ArrayList<Int>()
 
     /** 当前分类索引  */
     private var currentCategoryIndex = 0
@@ -7350,13 +7581,13 @@ class MainActivity : AppCompatActivity() {
         view.setClickable(true)
         view.setMinHeight(dp(50))
         view.setOnClickListener(listener)
-        // 焦点态:圆角青绿色背景;失去焦点:透明
+        // 焦点态:酒红背景与香槟金描边;失去焦点:透明
         view.setOnFocusChangeListener(OnFocusChangeListener { v: View?, hasFocus: Boolean ->
             if (hasFocus) {
                 val gd = GradientDrawable()
                 gd.setColor(FOCUS)
                 gd.setCornerRadius(dp(6).toFloat())
-                gd.setStroke(dp(1), Color.argb(100, 255, 255, 255))
+                gd.setStroke(dp(1), Color.argb(180, 231, 189, 112))
                 v!!.setBackground(gd)
                 view.setTextColor(Color.rgb(8, 12, 18))
             } else {
@@ -7408,9 +7639,13 @@ class MainActivity : AppCompatActivity() {
                 val view = super.getView(position, convertView, parent) as TextView
                 view.setTextColor(TEXT_WHITE)
                 view.setTextSize(18f)
-                view.setMinHeight(dp(48))
+                view.setMinHeight(dp(54))
                 view.setGravity(Gravity.CENTER_VERTICAL)
-                view.setPadding(dp(14), dp(4), dp(14), dp(4))
+                view.setPadding(dp(18), dp(6), dp(18), dp(6))
+                // 统一使用电视端酒红焦点选择器：遥控器移动时有明确反馈，
+                // 同时保留 ListView 自身的选中/激活状态，不改变点击与点歌逻辑。
+                view.setBackgroundResource(R.drawable.bg_song_row_selector)
+                view.setIncludeFontPadding(true)
                 return view
             }
         }
@@ -7524,7 +7759,16 @@ class MainActivity : AppCompatActivity() {
         rightColumn = findViewById<LinearLayout?>(R.id.right_column)
         subCategoryScroll = findViewById<HorizontalScrollView?>(R.id.sub_category_scroll)
         keyboardArea = findViewById<View?>(R.id.keyboard_area)
+        rankPageHeader = findViewById(R.id.rank_page_header)
+        rankPageTitle = findViewById(R.id.rank_page_title)
+        rankPageSubtitle = findViewById(R.id.rank_page_subtitle)
+        rankCategoryScroll = findViewById(R.id.rank_category_scroll)
         rankCategoryGrid = findViewById(R.id.rank_category_grid)
+        rankSpotlightCard = findViewById(R.id.rank_spotlight_card)
+        rankSpotlightLabel = findViewById(R.id.rank_spotlight_label)
+        rankSpotlightIcon = findViewById(R.id.rank_spotlight_icon)
+        rankSpotlightSong = findViewById(R.id.rank_spotlight_song)
+        rankSpotlightSinger = findViewById(R.id.rank_spotlight_singer)
         paginationBar = findViewById<View?>(R.id.pagination_bar)
         fullScreenContainer = findViewById<FrameLayout?>(R.id.container)
         // 全屏播放容器: 点击用于显隐控制层, 本身是铺满屏幕的表面, 不能有焦点/按下填充。
@@ -7553,6 +7797,28 @@ class MainActivity : AppCompatActivity() {
         if (homeCardRegular != null) homeCardRegular!!.setOnClickListener(View.OnClickListener { v: View? -> loadSangHistory() })
         if (homeCardFavorite != null) homeCardFavorite!!.setOnClickListener(View.OnClickListener { v: View? -> loadFavorites() })
         if (homeCardCategory != null) homeCardCategory!!.setOnClickListener(View.OnClickListener { v: View? -> loadCategoryPlaylists() })
+
+        // 明确标注首页入口语义，便于遥控器/无障碍服务识别；点击仍走现有曲库业务。
+        homeCardSong?.contentDescription = "歌名点歌，搜索歌曲"
+        homeCardSinger?.contentDescription = "歌星点歌，按歌手查找歌曲"
+        homeCardRank?.contentDescription = "排行榜，查看热门歌曲"
+        homeCardCategory?.contentDescription = "分类，按类型浏览歌曲"
+        homeCardLocal?.contentDescription = "本地，浏览已下载歌曲"
+        homeCardRegular?.contentDescription = "常唱，查看已唱歌曲"
+        homeCardFavorite?.contentDescription = "收藏，查看收藏歌曲"
+        listOfNotNull(
+            homeCardSong, homeCardSinger, homeCardRank, homeCardLocal,
+            homeCardCategory, homeCardRegular, homeCardFavorite,
+        ).forEach { card ->
+            card.isClickable = true
+            card.isFocusable = true
+            card.isFocusableInTouchMode = true
+        }
+        btnTopSearch?.contentDescription = "搜索歌曲"
+        btnTopNext?.contentDescription = "切换下一首"
+        btnTopPause?.contentDescription = if (playWhenPrepared) "暂停播放" else "继续播放"
+        btnTopReplay?.contentDescription = "重新播放当前歌曲"
+
         val homePoster = findViewById<View?>(R.id.home_poster_container)
         homePosterView = homePoster
         textPosterPage?.text = "1/${homeBanners.size}"
@@ -7649,6 +7915,16 @@ class MainActivity : AppCompatActivity() {
         // 设置搜索/翻页事件
         if (btnDoSearch != null) btnDoSearch!!.setOnClickListener(View.OnClickListener { v: View? -> performSearch() })
         if (searchInput != null) {
+            // 触摸/遥控器把焦点移到输入框时，主动唤起系统输入法；不能只依赖底部“系统”键。
+            searchInput!!.isFocusable = true
+            searchInput!!.isFocusableInTouchMode = true
+            searchInput!!.showSoftInputOnFocus = true
+            searchInput!!.setOnClickListener { showSystemKeyboard() }
+            searchInput!!.setOnFocusChangeListener { view, hasFocus ->
+                if (hasFocus && keyboardArea?.visibility == View.VISIBLE) {
+                    view.post { showSystemKeyboard() }
+                }
+            }
             searchInput!!.setOnEditorActionListener(OnEditorActionListener { v: TextView?, actionId: Int, event: KeyEvent? ->
                 performSearch()
                 true
@@ -7692,9 +7968,14 @@ class MainActivity : AppCompatActivity() {
             }
             if (browseMode == "quick" || browseMode == "category_list") return@OnItemClickListener
             if ("singer_list" == browseMode) {
-                if (position < visibleSingers.size) {
-                    val singer = visibleSingers.get(position)!!
-                    loadSingerSongs(singer[0], singer[1])
+                // SingerGridAdapter now returns one singer per ListView row.
+                // Use the exact clicked row index; no legacy grid-column arithmetic.
+                visibleSingers.getOrNull(position)?.let { singer ->
+                    Log.i(TAG, "电视歌星列表选中 position=" + position + " id=" + singer.getOrNull(0) + " name=" + singer.getOrNull(1))
+                    loadSingerSongs(singer.getOrNull(0), singer.getOrNull(1))
+                } ?: run {
+                    Log.w(TAG, "电视歌星列表点击越界 position=" + position + " size=" + visibleSingers.size)
+                    toast("歌手列表状态异常，请重新进入歌星点歌")
                 }
                 return@OnItemClickListener
             }
@@ -7779,6 +8060,17 @@ class MainActivity : AppCompatActivity() {
         if (homeLayout != null) homeLayout!!.setVisibility(View.VISIBLE)
         configureTvFocusNavigation()
         movePlayerToHost(homePlayerHost)
+        // 首页重排后宿主尺寸会在本轮布局结束时才稳定；重新同步视频浮层边界，
+        // 否则 Surface 仍可能停留在旧宿主坐标/尺寸，表现为首页看不到 MV。
+        homePlayerHost?.let { host ->
+            host.post {
+                if (host.visibility == View.VISIBLE && host.width > 0 && host.height > 0) {
+                    applyPlayerBounds(host)
+                    player?.bringToFront()
+                    playerTouchOverlay?.bringToFront()
+                }
+            }
+        }
         // 同步当前播放信息到首页
         syncPlayerInfo()
         // 隐藏已点的子页面辅助控件
@@ -7789,10 +8081,76 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 歌星页的手机适配：窄屏时把搜索框移动到结果区，并让歌手卡片占满宽度；
+     * 电视/平板继续保留左侧播放器与屏幕键盘。
+     */
+    private fun updateSubPageColumns() {
+        val widthDp = resources.configuration.screenWidthDp.coerceAtLeast(1)
+        val density = resources.displayMetrics.density.coerceAtLeast(0.1f)
+        val left = findViewById<LinearLayout?>(R.id.left_column)
+        val right = findViewById<LinearLayout?>(R.id.right_column)
+        val searchRow = findViewById<View?>(R.id.search_input_row)
+        val keyboardArea = findViewById<LinearLayout?>(R.id.keyboard_area)
+        val useWideSingerPage = singerBrowseLayout && widthDp < 600
+
+        if (useWideSingerPage && right != null && searchRow != null) {
+            val parent = searchRow.parent as? ViewGroup
+            if (parent !== right) {
+                val params = searchRow.layoutParams
+                parent?.removeView(searchRow)
+                val category = right.findViewById<View?>(R.id.sub_category_scroll)
+                val index = category?.let(right::indexOfChild)?.takeIf { it >= 0 } ?: right.childCount
+                right.addView(searchRow, index, params)
+            }
+        } else if (!useWideSingerPage && keyboardArea != null && searchRow != null) {
+            val parent = searchRow.parent as? ViewGroup
+            if (parent !== keyboardArea) {
+                val params = searchRow.layoutParams
+                parent?.removeView(searchRow)
+                keyboardArea.addView(searchRow, 0, params)
+            }
+        }
+
+        if (useWideSingerPage) {
+            left?.visibility = View.GONE
+            right?.layoutParams = (right?.layoutParams as? LinearLayout.LayoutParams)?.apply {
+                width = 0
+                weight = 1f
+                marginEnd = 0
+            }
+        } else {
+            left?.visibility = View.VISIBLE
+            val leftWeight = when {
+                singerBrowseLayout -> 0.72f
+                widthDp < 900 -> 0.90f
+                widthDp < 1100 -> 0.94f
+                widthDp >= 1700 -> 1.04f
+                else -> 1.00f
+            }
+            left?.layoutParams = (left?.layoutParams as? LinearLayout.LayoutParams)?.apply {
+                width = 0
+                weight = leftWeight
+                marginEnd = ((if (singerBrowseLayout) 10f else 12f) * density).toInt()
+            }
+            right?.layoutParams = (right?.layoutParams as? LinearLayout.LayoutParams)?.apply {
+                width = 0
+                weight = 2.02f - leftWeight
+                marginEnd = 0
+            }
+        }
+    }
+
+    private fun setSingerBrowseLayout(enabled: Boolean) {
+        singerBrowseLayout = enabled
+        updateSubPageColumns()
+    }
+
+    /**
      * 切换到子页面外壳(左视频+键盘 / 右内容)
      * @param breadcrumb 面包屑显示文字(主页 / xxx)
      */
     private fun showSubPageShell(breadcrumb: String) {
+        setSingerBrowseLayout(false)
         rememberReturnPointIfNeeded(breadcrumb)
         browseRequestVersion++
         visibleSongs.clear()
@@ -7828,7 +8186,7 @@ class MainActivity : AppCompatActivity() {
             breadcrumbCurrent!!.text = breadcrumb.removePrefix("主页").ifEmpty { " / 首页" }
         }
         if (keyboardArea != null) keyboardArea!!.setVisibility(View.VISIBLE)
-        rankCategoryGrid?.visibility = View.GONE
+        hideRankUi()
         if (tabContainer != null) tabContainer!!.setVisibility(View.VISIBLE)
         if (paginationBar != null) paginationBar!!.setVisibility(View.GONE)
         browsePagination?.visibility = View.VISIBLE
@@ -7836,7 +8194,7 @@ class MainActivity : AppCompatActivity() {
             songList!!.setBackgroundResource(R.drawable.bg_song_list)
             songList!!.setDivider(ColorDrawable(Color.argb(34, 255, 255, 255)))
             songList!!.setDividerHeight(dp(1))
-            songList!!.selector = ColorDrawable(Color.TRANSPARENT)
+            songList!!.selector = AppCompatResources.getDrawable(this, R.drawable.bg_song_row_selector)
             songList!!.itemsCanFocus = true
             songList!!.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         }
@@ -7915,6 +8273,7 @@ class MainActivity : AppCompatActivity() {
             overlay.layoutParams = overlayParams
             overlay.visibility = if (isFullScreen) View.GONE else View.VISIBLE
         }
+        updateMobileQrOverlayBounds()
         updatePlaybackNoticeBounds()
     }
 
@@ -7929,6 +8288,7 @@ class MainActivity : AppCompatActivity() {
         params.topMargin = 0
         video.layoutParams = params
         playerFocusBorder?.visibility = View.GONE
+        mobileQrOverlay?.visibility = View.GONE
         video.bringToFront()
         songIntroNotice?.bringToFront()
         songIntroIcon?.bringToFront()
@@ -8045,6 +8405,18 @@ class MainActivity : AppCompatActivity() {
         if (playerSongSinger?.text?.toString() != singer) playerSongSinger?.setText(singer)
         val tip = "当前: " + nowNext.current + "  下首: " + nowNext.next
         if (textCurrentSongTip?.text?.toString() != tip) textCurrentSongTip?.setText(tip)
+
+        // 首页是播放状态的实时入口：队列也可能由手机遥控端或下载完成回调修改，
+        // 因此在统一刷新点同步数量与暂停状态，避免只在本地点击时更新。
+        updateOrderBadge()
+        val pauseLabel = if (playWhenPrepared) "暂停" else "播放"
+        if (btnTopPause?.text?.toString() != pauseLabel) {
+            btnTopPause?.text = pauseLabel
+            setTopControlIcon(
+                btnTopPause,
+                if (playWhenPrepared) R.drawable.ott_ic_ctrl_pause else R.drawable.ott_ic_ctrl_play,
+            )
+        }
     }
 
     /** 「当前播放 / 下一首」文本对(下一首按当前曲目在队列中的位置取其后一首)。 */
@@ -8068,11 +8440,28 @@ class MainActivity : AppCompatActivity() {
 
     private fun currentAndNextText(): String = nowNextText().combined()
 
+    /**
+     * 歌名/歌星共用雷石式点歌工作区：左侧 MV + 输入框 + 屏幕键盘，
+     * 右侧分类条 + 对应歌曲/歌手结果。两种入口只切换数据，不切换布局。
+     */
+    private fun prepareLeishiSearchWorkspace(hint: String) {
+        keyboardArea?.visibility = View.VISIBLE
+        searchInput?.apply {
+            this.hint = hint
+            isFocusable = true
+            isFocusableInTouchMode = true
+            showSoftInputOnFocus = true
+        }
+        searchInput?.clearFocus()
+        updateMobileQrOverlayBounds()
+    }
+
     /** 顶栏搜索按钮 - 跳到搜索页  */
     private fun showSearchPage() {
         searchScope = "song"
         activeSearchQuery = ""
         setSearchText("")
+        prepareLeishiSearchWorkspace("输入歌名或首字母搜索")
         showSubPageShell("主页 / 歌名")
         currentTabIndex = 0
         setupTabs()
@@ -8099,6 +8488,7 @@ class MainActivity : AppCompatActivity() {
         searchScope = "quick"
         activeSearchQuery = ""
         setSearchText("")
+        searchInput?.hint = "输入歌名、歌手或首字母搜索"
         showSubPageShell("主页 / 快搜")
         currentTabIndex = 8
         setupTabs()
@@ -8123,6 +8513,7 @@ class MainActivity : AppCompatActivity() {
         searchScope = "local"
         activeSearchQuery = ""
         setSearchText("")
+        searchInput?.hint = "输入本地歌曲名称或首字母搜索"
         currentTabIndex = 10
         showSubPageShell("主页 / 本地")
         setupTabs()
@@ -8389,7 +8780,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun configureTvFocusNavigation() {
-        btnTopSearch?.nextFocusDownId = R.id.home_player_container
+        btnTopSearch?.nextFocusDownId = R.id.home_card_song
         btnTopOrder?.nextFocusDownId = R.id.home_card_rank
         btnTopVocal?.nextFocusDownId = R.id.home_card_rank
         btnTopNext?.nextFocusDownId = R.id.home_card_rank
@@ -8398,37 +8789,39 @@ class MainActivity : AppCompatActivity() {
         btnTopTone?.nextFocusDownId = R.id.home_poster_container
 
         homePlayerHost?.nextFocusUpId = R.id.btn_top_search
+        homePlayerHost?.nextFocusLeftId = R.id.home_card_song
         homePlayerHost?.nextFocusDownId = R.id.home_card_regular
-        homePlayerHost?.nextFocusRightId = R.id.home_card_rank
-
-        homeCardRank?.nextFocusUpId = R.id.btn_top_pause
-        homeCardRank?.nextFocusLeftId = R.id.home_player_container
-        homeCardRank?.nextFocusDownId = R.id.home_card_song
-        homeCardRank?.nextFocusRightId = R.id.home_poster_container
-        homeCardSong?.nextFocusUpId = R.id.home_card_rank
-        homeCardSong?.nextFocusDownId = R.id.home_card_singer
-        homeCardSong?.nextFocusRightId = R.id.home_poster_container
-        homeCardSinger?.nextFocusUpId = R.id.home_card_song
-        homeCardSinger?.nextFocusDownId = R.id.home_card_local
-        homeCardSinger?.nextFocusRightId = R.id.home_poster_container
-        homeCardLocal?.nextFocusUpId = R.id.home_card_singer
-        homeCardLocal?.nextFocusLeftId = R.id.home_card_category
-        homeCardLocal?.nextFocusDownId = R.id.btn_bottom_settings
-        homeCardLocal?.nextFocusRightId = R.id.home_poster_container
-        homeCardRegular?.nextFocusUpId = R.id.home_player_container
-        homeCardRegular?.nextFocusRightId = R.id.home_card_favorite
-        homeCardRegular?.nextFocusDownId = R.id.btn_bottom_guess
-        homeCardFavorite?.nextFocusUpId = R.id.btn_top_search
-        homeCardFavorite?.nextFocusLeftId = R.id.home_card_regular
-        homeCardFavorite?.nextFocusRightId = R.id.home_card_category
-        homeCardFavorite?.nextFocusDownId = R.id.btn_bottom_guess
-        homeCardCategory?.nextFocusUpId = R.id.home_card_rank
-        homeCardCategory?.nextFocusLeftId = R.id.home_card_favorite
-        homeCardCategory?.nextFocusRightId = R.id.home_card_local
-        homeCardCategory?.nextFocusDownId = R.id.btn_bottom_settings
         homePosterView?.nextFocusUpId = R.id.btn_top_tone
-        homePosterView?.nextFocusLeftId = R.id.home_card_song
-        homePosterView?.nextFocusDownId = R.id.btn_bottom_exit
+        homePosterView?.nextFocusLeftId = R.id.home_player_container
+        homePosterView?.nextFocusDownId = R.id.home_card_favorite
+
+        // Left rail: song -> singer -> rank -> local.
+        homeCardSong?.nextFocusUpId = R.id.btn_top_search
+        homeCardSong?.nextFocusDownId = R.id.home_card_singer
+        homeCardSong?.nextFocusRightId = R.id.home_player_container
+
+        homeCardSinger?.nextFocusUpId = R.id.home_card_song
+        homeCardSinger?.nextFocusDownId = R.id.home_card_rank
+        homeCardSinger?.nextFocusRightId = R.id.home_player_container
+
+        homeCardRank?.nextFocusUpId = R.id.home_card_singer
+        homeCardRank?.nextFocusDownId = R.id.home_card_local
+        homeCardRank?.nextFocusRightId = R.id.home_player_container
+
+        homeCardLocal?.nextFocusUpId = R.id.home_card_rank
+        homeCardLocal?.nextFocusDownId = R.id.home_card_category
+        homeCardLocal?.nextFocusRightId = R.id.home_player_container
+
+        // Bottom rail: category -> regular -> favorite.
+        homeCardCategory?.nextFocusUpId = R.id.home_card_local
+        homeCardCategory?.nextFocusRightId = R.id.home_card_regular
+
+        homeCardRegular?.nextFocusUpId = R.id.home_player_container
+        homeCardRegular?.nextFocusLeftId = R.id.home_card_category
+        homeCardRegular?.nextFocusRightId = R.id.home_card_favorite
+
+        homeCardFavorite?.nextFocusUpId = R.id.home_poster_container
+        homeCardFavorite?.nextFocusLeftId = R.id.home_card_regular
 
         btnBottomGuess?.nextFocusUpId = R.id.home_card_regular
         btnBottomGuess?.nextFocusRightId = R.id.btn_bottom_mobile_order
@@ -8466,7 +8859,7 @@ class MainActivity : AppCompatActivity() {
      * 更新 Tab 样式(选中/未选中)
      */
     private fun updateTabStyle(tab: TextView, selected: Boolean) {
-        val normalText = if (selected) Color.rgb(217, 184, 121) else Color.argb(180, 241, 241, 241)
+        val normalText = if (selected) Color.rgb(88, 225, 244) else Color.argb(210, 241, 241, 255)
         tab.setTextColor(ColorStateList(
             arrayOf(
                 intArrayOf(android.R.attr.state_focused),
@@ -8476,12 +8869,12 @@ class MainActivity : AppCompatActivity() {
             intArrayOf(Color.WHITE, Color.WHITE, normalText),
         ))
         val normal = GradientDrawable().apply {
-            setColor(if (selected) Color.argb(30, 217, 184, 121) else Color.TRANSPARENT)
+            setColor(if (selected) Color.argb(72, 80, 215, 239) else Color.TRANSPARENT)
             cornerRadius = dp(4).toFloat()
         }
         val focused = GradientDrawable(
             GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(Color.rgb(225, 203, 156), Color.rgb(169, 137, 83)),
+            intArrayOf(Color.rgb(104, 92, 224), Color.rgb(64, 54, 156)),
         ).apply {
             cornerRadius = dp(4).toFloat()
             setStroke(dp(1), Color.argb(150, 255, 255, 255))
@@ -8510,7 +8903,7 @@ class MainActivity : AppCompatActivity() {
         if (keyAbc != null) keyAbc.setOnClickListener(View.OnClickListener { v: View? ->
             hideSystemKeyboard()
             keyAbc.setBackgroundResource(R.drawable.bg_key_mode)
-            keyAbc.setTextColor(Color.rgb(0x27, 0xCC, 0xA4))
+            keyAbc.setTextColor(Color.rgb(79, 225, 242))
             if (key123 != null) {
                 key123.setBackgroundResource(R.drawable.bg_key_mode_dim)
                 key123.setTextColor(Color.argb(153, 255, 255, 255))
@@ -8518,17 +8911,12 @@ class MainActivity : AppCompatActivity() {
             renderKeyboard("abc")
         })
         if (key123 != null) key123.setOnClickListener(View.OnClickListener { v: View? ->
-            hideSystemKeyboard()
-            key123.setBackgroundResource(R.drawable.bg_key_mode)
-            key123.setTextColor(Color.rgb(0x27, 0xCC, 0xA4))
-            if (keyAbc != null) {
-                keyAbc.setBackgroundResource(R.drawable.bg_key_mode_dim)
-                keyAbc.setTextColor(Color.argb(153, 255, 255, 255))
-            }
-            renderKeyboard("123")
+            // “手写”入口调用当前系统输入法；支持手写的输入法会显示书写面板。
+            showSystemKeyboard()
         })
         if (keySpace != null) keySpace.setOnClickListener(View.OnClickListener { v: View? ->
-            showSystemKeyboard()
+            // “系统”入口允许用户切换到设备安装的其它输入法。
+            showInputMethodPicker()
         })
         if (keyBackspace != null) keyBackspace.setOnClickListener(View.OnClickListener { v: View? ->
             if (searchInput == null) return@OnClickListener
@@ -8596,7 +8984,12 @@ class MainActivity : AppCompatActivity() {
             for (key in row) {
                 val btn = TextView(this)
                 btn.setText(key)
-                btn.setTextSize(15f)
+                val keyboardConfig = resources.configuration
+                val keyScale = minOf(
+                    keyboardConfig.screenWidthDp / 1280f,
+                    keyboardConfig.screenHeightDp / 720f,
+                ).coerceIn(0.62f, 1.25f)
+                btn.setTextSize((15f * keyScale).coerceIn(11f, 19f))
                 btn.setTextColor(Color.rgb(241, 241, 241))
                 btn.setGravity(Gravity.CENTER)
                 btn.setBackgroundColor(Color.TRANSPARENT)
@@ -8658,10 +9051,30 @@ class MainActivity : AppCompatActivity() {
 
     private fun showSystemKeyboard() {
         val input = searchInput ?: return
-        input.inputType = InputType.TYPE_CLASS_TEXT
+        input.apply {
+            isFocusable = true
+            isFocusableInTouchMode = true
+            showSoftInputOnFocus = true
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+            requestFocus()
+        }
+        // 允许中文输入法按需弹出，同时让内容区为横屏输入法留出空间。
+        window.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED or
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+        )
+        input.post {
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.restartInput(input)
+            imm?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun showInputMethodPicker() {
+        val input = searchInput ?: return
         input.requestFocus()
-        (getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager)
-            ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+        val manager = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+        if (manager != null) manager.showInputMethodPicker() else showSystemKeyboard()
     }
 
     private fun hideSystemKeyboard() {
@@ -8673,6 +9086,10 @@ class MainActivity : AppCompatActivity() {
     /**
      * 加载热门歌曲列表
      */
+    /**
+     * 新版排行榜入口：曲库仍使用官方 Muse playlist ID，界面与旧版三列大卡片彻底解耦。
+     * 榜单横向切换、歌曲分页和点歌动作分别处理，避免 UI 重排影响播放链路。
+     */
     private fun loadHotSongs(preferredRankName: String? = null) {
         searchScope = "none"
         activeSearchQuery = ""
@@ -8680,125 +9097,217 @@ class MainActivity : AppCompatActivity() {
         currentTabIndex = 9
         showSubPageShell("主页 / 排行榜")
         setupTabs()
-        if (keyboardArea != null) keyboardArea!!.setVisibility(View.GONE)
-        rankCategoryGrid?.visibility = View.VISIBLE
-        listTitle!!.setText("排行榜")
+
+        keyboardArea?.visibility = View.GONE
+        subCategoryScroll?.visibility = View.GONE
+        rankPageHeader?.visibility = View.VISIBLE
+        rankCategoryScroll?.visibility = View.VISIBLE
+        rankSpotlightCard?.visibility = View.VISIBLE
+        rankPageTitle?.text = "排行榜精选"
+        rankPageSubtitle?.text = "正在读取曲库榜单…"
+        rankSpotlightIcon?.setImageResource(R.drawable.img_rank_hot)
+        rankSpotlightSong?.text = "正在加载热门歌曲"
+        rankSpotlightSinger?.text = "从右侧选择榜单，查看最新曲目"
+
         browseMode = "rank"
         browseParam = ""
         browsePage = 0
         currentCategories.clear()
         rankPlaylistIds.clear()
+        rankPlaylistCounts.clear()
         currentCategoryIndex = 0
+        rankCategoryGrid?.removeAllViews()
         updateCategories()
+        subCategoryScroll?.visibility = View.GONE
+
         if (!library.muse.isAvailable()) {
             catalogRefreshPending = true
-            busy(true, "曲库加载中...")
+            busy(true, "曲库加载中…")
             return
         }
+
         io.execute {
             val playlists = library.muse.rankPlaylists()
             main.post {
                 if (currentTabIndex != 9 || browseMode != "rank") return@post
                 currentCategories.clear()
                 rankPlaylistIds.clear()
+                rankPlaylistCounts.clear()
                 playlists.forEach { playlist ->
-                    rankPlaylistIds.add(playlist[0].orEmpty())
-                    currentCategories.add(playlist[1].orEmpty())
+                    val id = playlist.getOrNull(0).orEmpty()
+                    val name = playlist.getOrNull(1).orEmpty()
+                    if (id.isNotBlank() && name.isNotBlank()) {
+                        rankPlaylistIds.add(id)
+                        currentCategories.add(name)
+                        rankPlaylistCounts.add(playlist.getOrNull(3)?.toIntOrNull() ?: 0)
+                    }
                 }
-                // 幻灯片入口可指定首选榜单名(如"新歌榜"); 未命中时沿用默认热歌榜逻辑。
+
+                if (currentCategories.isEmpty()) {
+                    rankPageSubtitle?.text = "当前曲库暂未提供排行榜，请先刷新曲库"
+                    rankSpotlightSong?.text = "暂无可用榜单"
+                    rankSpotlightSinger?.text = "曲库同步后会自动显示可用榜单"
+                    visibleSongs.clear()
+                    renderSongList()
+                    browseTotalCount = 0
+                    browseTotalPages = 0
+                    updatePageInfo()
+                    busy(false, "")
+                    updateRankCategoryGrid()
+                    return@post
+                }
+
                 val preferred = preferredRankName?.trim().orEmpty()
-                currentCategoryIndex = if (preferred.isNotEmpty()) {
-                    playlists.indexOfFirst { (it[1] ?: "").contains(preferred) }
-                        .takeIf { it >= 0 }
-                        ?: playlists.indexOfFirst { it[2] == "2" || it[1] == "热歌榜" }
+                val preferredIndex = if (preferred.isNotEmpty()) {
+                    currentCategories.indexOfFirst { it.contains(preferred, ignoreCase = true) }
                 } else {
-                    playlists.indexOfFirst { it[2] == "2" || it[1] == "热歌榜" }
-                }.takeIf { it >= 0 } ?: 0
+                    -1
+                }
+                val hotIndex = currentCategories.indexOfFirst { it.contains("热歌") }
+                val rankTypeHotId = playlists.firstOrNull { it.getOrNull(2) == "2" }
+                    ?.getOrNull(0).orEmpty()
+                val rankTypeHotIndex = rankPlaylistIds.indexOf(rankTypeHotId).takeIf { it >= 0 }
+                currentCategoryIndex = when {
+                    preferredIndex >= 0 -> preferredIndex
+                    hotIndex >= 0 -> hotIndex
+                    rankTypeHotIndex != null -> rankTypeHotIndex
+                    else -> 0
+                }
+
                 browseParam = rankPlaylistIds.getOrNull(currentCategoryIndex).orEmpty()
-                listTitle!!.text = currentCategories.getOrNull(currentCategoryIndex) ?: "排行榜"
+                listTitle?.text = currentCategories.getOrNull(currentCategoryIndex) ?: "排行榜"
                 updateRankCategoryGrid()
+                updateRankPageHeader()
                 subCategoryScroll?.visibility = View.GONE
                 loadBrowsePage()
             }
         }
     }
 
-    /** 按榜单名挑专属主题图, 未命中回退默认奖杯。 */
+    private fun hideRankUi() {
+        rankPageHeader?.visibility = View.GONE
+        rankCategoryScroll?.visibility = View.GONE
+        rankSpotlightCard?.visibility = View.GONE
+    }
+
     private fun rankIconRes(title: String): Int = when {
+        title.contains("抖音") -> R.drawable.img_rank_douyin
         title.contains("劲歌") || title.contains("热舞") || title.contains("舞") -> R.drawable.img_rank_dance
         title.contains("新歌") -> R.drawable.img_rank_new
         title.contains("热歌") -> R.drawable.img_rank_hot
         title.contains("飙升") -> R.drawable.img_rank_rise
-        title.contains("抖音") -> R.drawable.img_rank_douyin
-        title.contains("内地") || title.contains("大陆") -> R.drawable.img_rank_mainland
+        title.contains("内地") || title.contains("大陆") || title.contains("华语") -> R.drawable.img_rank_mainland
         title.contains("香港") || title.contains("粤语") -> R.drawable.img_rank_hk
         title.contains("台湾") || title.contains("闽南") -> R.drawable.img_rank_tw
-        title.contains("流行") || title.contains("指数") -> R.drawable.img_rank_trend
+        title.contains("流行") || title.contains("指数") || title.contains("原创") -> R.drawable.img_rank_trend
         else -> R.drawable.ic_default_rank_avatar
+    }
+
+    private fun rankDisplayName(title: String): String = when {
+        title.contains("抖音") && title.contains("飙升") -> "抖音飙升"
+        title.contains("抖音") -> "抖音热歌"
+        title.contains("新歌") -> "新歌榜"
+        title.contains("热歌") -> "热歌榜"
+        title.contains("飙升") -> "飙升榜"
+        title.contains("香港") -> "港台金曲"
+        title.contains("台湾") -> "台湾金曲"
+        title.contains("内地") || title.contains("大陆") -> "内地热歌"
+        else -> title
+    }
+
+    private fun rankChipBackground(selected: Boolean): GradientDrawable {
+        val background = if (selected) {
+            GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.rgb(116, 39, 58), Color.rgb(65, 31, 45)),
+            )
+        } else {
+            GradientDrawable().apply { setColor(Color.rgb(27, 37, 49)) }
+        }
+        background.cornerRadius = dp(18).toFloat()
+        background.setStroke(
+            dp(1),
+            if (selected) Color.rgb(220, 177, 111) else Color.rgb(58, 73, 91),
+        )
+        return background
+    }
+
+    private fun selectRankPlaylist(index: Int) {
+        if (index !in currentCategories.indices || index !in rankPlaylistIds.indices) return
+        if (index == currentCategoryIndex && browseMode == "rank") return
+        currentCategoryIndex = index
+        browseMode = "rank"
+        browseParam = rankPlaylistIds[index]
+        browsePage = 0
+        listTitle?.text = currentCategories[index]
+        visibleSongs.clear()
+        updateRankCategoryGrid()
+        updateRankPageHeader()
+        updateRankSpotlight(null)
+        loadBrowsePage()
+    }
+
+    private fun updateRankPageHeader() {
+        val title = currentCategories.getOrNull(currentCategoryIndex) ?: "热门榜单"
+        val count = rankPlaylistCounts.getOrNull(currentCategoryIndex) ?: 0
+        val countText = if (count > 0) "$count 首歌曲" else "曲目持续更新"
+        rankPageSubtitle?.text = "$title  ·  $countText  ·  共 ${currentCategories.size} 个榜单"
+    }
+
+    private fun updateRankSpotlight(song: Song? = visibleSongs.firstOrNull()) {
+        val title = currentCategories.getOrNull(currentCategoryIndex) ?: "热歌榜"
+        rankSpotlightLabel?.text = "${rankDisplayName(title)} · TOP 1 推荐"
+        rankSpotlightIcon?.setImageResource(rankIconRes(title))
+        if (song == null) {
+            rankSpotlightSong?.text = if (browseTotalCount == 0) "暂无歌曲" else "正在加载歌曲…"
+            rankSpotlightSinger?.text = "选择右侧榜单，歌曲点击即可加入已点队列"
+            return
+        }
+        val position = browsePage * browsePageSize() + 1
+        rankSpotlightSong?.text = song.title?.takeIf { it.isNotBlank() } ?: "未命名歌曲"
+        rankSpotlightSinger?.text = "本页第 $position 位  ·  ${song.singer.orEmpty()}"
     }
 
     private fun updateRankCategoryGrid() {
         val grid = rankCategoryGrid ?: return
-        // 内容区让出顶栏高度后，榜单格子的行高会变紧；必须按真实行高缩放
-        // 图标/字号，否则"图标在上文字在下"的单元格会把文字整行裁掉。
-        if (grid.width <= 0 || grid.height <= 0) {
-            grid.post { if (rankCategoryGrid === grid) updateRankCategoryGrid() }
-            return
-        }
         grid.removeAllViews()
-        val rowH = (grid.height - dp(18)) / 3
-        val iconSize = when {
-            rowH >= dp(64) -> dp(42)
-            rowH >= dp(52) -> dp(30)
-            rowH > 0 -> dp(24)
-            else -> dp(if (compactUi) 30 else 42)
-        }
-        val labelSp = if (iconSize >= dp(42)) 14f else 12f
-        currentCategories.take(9).forEachIndexed { index, title ->
-            val tile = TextView(this).apply {
-                text = title
-                textSize = labelSp
-                setTextColor(Color.WHITE)
+        if (currentCategories.isEmpty()) return
+
+        currentCategories.forEachIndexed { index, title ->
+            val chip = TextView(this).apply {
+                text = rankDisplayName(title)
+                textSize = 14f
+                maxLines = 1
                 gravity = Gravity.CENTER
-                isClickable = true
+                setPadding(dp(15), 0, dp(15), 0)
+                minHeight = dp(44)
                 isFocusable = true
-                setBackgroundResource(
-                    if (index == currentCategoryIndex) R.drawable.ott_bg_rank_item_selected
-                    else R.drawable.ott_bg_rank_item_not_selected
-                )
+                isClickable = true
+                setTextColor(if (index == currentCategoryIndex) Color.rgb(255, 230, 190) else Color.rgb(220, 227, 236))
+                background = rankChipBackground(index == currentCategoryIndex)
                 val icon = AppCompatResources.getDrawable(context, rankIconRes(title))?.mutate()
-                icon?.setBounds(0, 0, iconSize, iconSize)
-                setCompoundDrawables(null, icon, null, null)
-                compoundDrawablePadding = dp(1)
-                setOnClickListener {
-                    if (index == currentCategoryIndex) return@setOnClickListener
-                    currentCategoryIndex = index
-                    browseMode = "rank"
-                    browseParam = rankPlaylistIds.getOrNull(index).orEmpty()
-                    browsePage = 0
-                    listTitle?.text = title
-                    updateRankCategoryGrid()
-                    loadBrowsePage()
-                }
+                icon?.setBounds(0, 0, dp(18), dp(18))
+                setCompoundDrawablesRelative(icon, null, null, null)
+                compoundDrawablePadding = dp(7)
+                setAccessibleFocus(
+                    "focus:rank:${rankPlaylistIds.getOrNull(index).orEmpty()}",
+                    "排行榜，${rankDisplayName(title)}，${rankPlaylistCounts.getOrNull(index) ?: 0} 首歌曲",
+                )
+                setOnClickListener { selectRankPlaylist(index) }
             }
-            installPressFeedback(tile)
-            val gridParams = GridLayout.LayoutParams().apply {
-                setMargins(dp(3), dp(3), dp(3), dp(3))
+            installPressFeedback(chip)
+            grid.addView(
+                chip,
+                LinearLayout.LayoutParams(-2, dp(44)).apply { marginEnd = dp(9) },
+            )
+        }
+
+        val selected = grid.getChildAt(currentCategoryIndex)
+        if (selected != null) {
+            rankCategoryScroll?.post {
+                val scroll = rankCategoryScroll ?: return@post
+                scroll.smoothScrollTo(max(0, selected.left - dp(24)), 0)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                gridParams.rowSpec = GridLayout.spec(index / 3, 1f)
-                gridParams.columnSpec = GridLayout.spec(index % 3, 1f)
-                gridParams.width = 0
-                gridParams.height = 0
-            } else {
-                // Android 4.4 的 GridLayout 没有带 weight 的 spec(API 21 引入),
-                // 改为按容器尺寸三等分算出每格固定宽高(减掉 3 列各自的左右 margin)。
-                gridParams.rowSpec = GridLayout.spec(index / 3)
-                gridParams.columnSpec = GridLayout.spec(index % 3)
-                gridParams.width = if (grid.width > 0) (grid.width - dp(18)) / 3 else dp(96)
-                gridParams.height = if (grid.height > 0) (grid.height - dp(18)) / 3 else dp(96)
-            }
-            grid.addView(tile, gridParams)
         }
     }
 
@@ -8866,7 +9375,7 @@ class MainActivity : AppCompatActivity() {
         currentCategoryIndex = -1
         updateCategories()
         keyboardArea?.visibility = View.GONE
-        rankCategoryGrid?.visibility = View.GONE
+        hideRankUi()
         subCategoryScroll?.visibility = View.GONE
         browseMode = "keyword_playlist"
         browseParam = keyword
@@ -8915,7 +9424,7 @@ class MainActivity : AppCompatActivity() {
         currentCategoryIndex = -1
         updateCategories()
         keyboardArea?.visibility = View.GONE
-        rankCategoryGrid?.visibility = View.GONE
+        hideRankUi()
         subCategoryScroll?.visibility = View.GONE
         browseMode = "tag_group"
         browseParam = groupName
@@ -8955,7 +9464,7 @@ class MainActivity : AppCompatActivity() {
         currentCategoryIndex = -1
         updateCategories()
         keyboardArea?.visibility = View.GONE
-        rankCategoryGrid?.visibility = View.GONE
+        hideRankUi()
         subCategoryScroll?.visibility = View.GONE
         browseMode = "search"
         browseParam = keyword
@@ -9131,8 +9640,10 @@ class MainActivity : AppCompatActivity() {
         searchScope = "singer"
         activeSearchQuery = ""
         setSearchText("")
+        prepareLeishiSearchWorkspace("输入歌星名称或首字母搜索")
         currentTabIndex = 1
         showSubPageShell("主页 / 歌星")
+        setSingerBrowseLayout(true)
         setupTabs()
         listTitle!!.setText("歌星点歌")
         currentCategories.clear()
@@ -9161,7 +9672,7 @@ class MainActivity : AppCompatActivity() {
         val requestedPage = browsePage
         val requestedType = type.orEmpty()
         val requestedQuery = query.trim()
-        val pageSize = 8
+        val pageSize = browsePageSize()
         val offset = requestedPage * pageSize
         val (areaFilter, typeFilter) = singerFilter(type)
         io.execute(Runnable {
@@ -9182,12 +9693,15 @@ class MainActivity : AppCompatActivity() {
                 ) return@Runnable
                 browseTotalCount = total
                 browseTotalPages = (total + pageSize - 1) / pageSize
+                listTitle?.text = if (requestedQuery.isEmpty()) {
+                    "歌星点歌 · $total 位"
+                } else {
+                    "搜索结果 · $total 位"
+                }
                 visibleSingers.clear()
                 visibleSingers.addAll(singers)
                 songList!!.dividerHeight = 0
-                songList!!.adapter = SingerGridAdapter(this, singers) { singer ->
-                    loadSingerSongs(singer.getOrNull(0), singer.getOrNull(1))
-                }
+                songList!!.adapter = SingerGridAdapter(this, singers)
                 updatePageInfo()
             })
         })
@@ -9204,26 +9718,93 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadSingerSongs(singerId: String?, singerName: String?) {
+        val id = singerId?.trim().orEmpty()
+        val name = singerName?.trim().orEmpty()
+        if (name.isEmpty()) {
+            Log.w(TAG, "歌手条目缺少有效名称")
+            toast("歌手信息不完整，请刷新曲库后重试")
+            return
+        }
+
+        // 没有歌手编号时仍允许按名称查询，避免卡片看似可点但直接被拦截。
+        val mode = if (id.isNotEmpty()) "singer_id" else "singer"
+        val param = if (id.isNotEmpty()) id else name
+
+        // 先立即切换到歌曲页面；歌曲数据在后台查询，不依赖旧歌手网格的 ListView 状态。
+        Log.i(TAG, "歌手卡片点击：$name，id=$id")
+        toast("正在打开${name}的歌曲…")
         searchScope = "singer_songs"
-        searchContextId = singerId.orEmpty()
+        searchContextId = id
         activeSearchQuery = ""
         setSearchText("")
-        showSubPageShell("主页 / 歌星 / " + singerName)
+        prepareLeishiSearchWorkspace("输入歌曲名称或首字母搜索")
+        showSubPageShell("主页 / 歌星 / " + name)
         currentTabIndex = 1
         setupTabs()
-        browseMode = "singer_id"
-        browseParam = singerId
+        browseMode = mode
+        browseParam = param
         browsePage = 0
-        listTitle!!.setText(singerName)
-        loadBrowsePage()
-    }
+        listTitle!!.text = name
 
-    /**
-     * 加载收藏歌曲
-     */
-    /**
-     * 加载歌单
-     */
+        val pageSize = MuseDatabase.PAGE_SIZE
+        val key = BrowseCacheKey(mode, param, searchLanguage, "", 0, pageSize)
+        val requestVersion = ++browseRequestVersion
+        visibleSongs.clear()
+        modernSongAdapter = null
+        songList?.adapter = tvAdapter()
+        updatePageInfo()
+        busy(true, "正在加载${name}的歌曲…")
+
+        io.execute {
+            val result = try {
+                var total = if (id.isNotEmpty()) library.muse.countSongsBySinger(id) else 0
+                var songs = if (id.isNotEmpty()) {
+                    library.muse.songsBySinger(id, 0, pageSize)
+                } else {
+                    mutableListOf()
+                }
+
+                // 兼容歌手关联表未完整回填、或旧曲库仅保存歌手名称的情况。
+                if (songs.isEmpty() || total <= 0) {
+                    val nameTotal = library.muse.countSongsBySingerName(name)
+                    val nameSongs = library.muse.songsBySingerName(name, 0, pageSize)
+                    if (nameSongs.isNotEmpty() || nameTotal > total) {
+                        songs = nameSongs
+                        total = nameTotal
+                    }
+                }
+                BrowsePageResult(songs, total.coerceAtLeast(songs.size))
+            } catch (failure: Exception) {
+                Log.e(TAG, "歌手歌曲查询失败：name=$name id=$id", failure)
+                BrowsePageResult(emptyList(), 0)
+            }
+
+            synchronized(browsePageCache) { browsePageCache[key] = result }
+            synchronized(browseCountCache) { browseCountCache[browseCountKey(key)] = result.total }
+
+            main.post {
+                if (requestVersion != browseRequestVersion ||
+                    browseMode != mode || browseParam.orEmpty() != param || browsePage != 0
+                ) return@post
+
+                busy(false, "")
+                browseTotalCount = result.total
+                browseTotalPages = (result.total + pageSize - 1) / pageSize
+                visibleSongs.clear()
+                visibleSongs.addAll(result.songs)
+                modernSongAdapter = null
+                renderSongList()
+                updatePageInfo()
+                if (result.songs.isEmpty()) {
+                    toast("曲库中暂时没有找到${name}的歌曲，请检查曲库同步")
+                    Log.w(TAG, "歌手歌曲为空：name=$name id=$id count=${result.total}")
+                } else {
+                    toast("已找到${result.total}首${name}的歌曲")
+                    Log.i(TAG, "歌手歌曲加载成功：name=$name id=$id count=${result.total} pageSize=${result.songs.size}")
+                }
+            }
+        }
+    }
     private fun loadPlaylists() {
         showSubPageShell("主页 / 歌单")
         listTitle!!.setText("我的歌单")
@@ -9411,6 +9992,13 @@ class MainActivity : AppCompatActivity() {
             SettingsEntry(R.drawable.ott_ic_play, "播放设置", "播放器、视频窗口相关设置") { showSettingsSection(2) },
             SettingsEntry(R.drawable.ott_ic_sound, "声音设置") { showSoundSettingsDialog() },
             SettingsEntry(
+                R.drawable.ott_ic_about_us,
+                "软件授权",
+                if (OfflineLicense.isActivated(this)) "已永久授权 · 本设备使用" else "试用中 · 69元一次付费永久使用",
+                "立即授权",
+            ) { showOfflineLicenseDialog(forceExit = false) },
+
+            SettingsEntry(
                 R.drawable.ott_ic_data_upgrade,
                 "应用更新",
                 "当前版本 ${BuildConfig.VERSION_NAME}，更新来源：Gitea Release",
@@ -9471,6 +10059,19 @@ class MainActivity : AppCompatActivity() {
             2 -> listOf(
                 SettingsEntry(R.drawable.ott_ic_download_setting, "开机清空下载列表", "开机时删除本地已下载歌曲并清理数据库状态", action = { clearDownloadsOnBoot = !clearDownloadsOnBoot; saveState() }, checked = clearDownloadsOnBoot),
                 SettingsEntry(R.drawable.ott_ic_tv_display_mode, "自动全屏", "设置多久未操作后自动进入全屏", "设置间隔") { showAutoFullscreenDialog() },
+                SettingsEntry(
+                    R.drawable.ott_ic_play,
+                    "硬件解码",
+                    "优先使用设备硬件解码播放4K MV；如花屏、黑屏或卡顿可关闭",
+                    action = {
+                        store.hardwareDecodeEnabled = !store.hardwareDecodeEnabled
+                        activeSettingsEntries.firstOrNull { it.title == "硬件解码" }?.checked = store.hardwareDecodeEnabled
+                        playbackEngine.setHardwareDecodeEnabled(store.hardwareDecodeEnabled)
+                        saveState()
+                        toast(if (store.hardwareDecodeEnabled) "硬件解码已开启，下一首 MV 生效" else "硬件解码已关闭，下一首 MV 使用软件解码")
+                    },
+                    checked = store.hardwareDecodeEnabled,
+                ),
                 SettingsEntry(R.drawable.ott_ic_play, "音画同步") { showAudioSyncDialog() },
                 SettingsEntry(R.drawable.ott_ic_marquee_setting, "歌曲片头字幕", action = { songTitleSubtitleEnabled = !songTitleSubtitleEnabled; saveState() }, checked = songTitleSubtitleEnabled),
             )
@@ -9776,7 +10377,7 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 addView(ImageView(this@MainActivity).apply {
-                    setImageResource(R.drawable.ktv_logo)
+                    setImageResource(R.drawable.ktv_brand_icon)
                     scaleType = ImageView.ScaleType.CENTER_INSIDE
                 }, LinearLayout.LayoutParams(dp(112), dp(112)))
                 addView(
@@ -10162,13 +10763,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAboutDialog() {
         AlertDialog.Builder(this)
-            .setTitle("关于晓晓呀")
-            .setMessage(
-                "框架来源：杨家三郎/麦动KTV\n" +
-                    "由 DSH 重构数据库源\n" +
-                    "此软件免费开源，请勿付费获取\n" +
-                    "版本：" + BuildConfig.VERSION_NAME
-            )
+            .setTitle("关于晓晓呀 KTV")
+            .setMessage("本软件由晓晓呀 KTV 制作与维护。\n软件使用与授权请以发布方提供的有效授权文件为准。音乐、MV、伴奏及曲库内容可能另受第三方版权约束。")
             .setPositiveButton("确定", null).create().showForTv(DialogInterface.BUTTON_POSITIVE)
     }
 
@@ -10193,20 +10789,18 @@ class MainActivity : AppCompatActivity() {
             val index = i
             val cat = TextView(this)
             cat.setText(currentCategories.get(i))
-            cat.setTextSize(16f)
-            cat.setPadding(dp(12), 0, dp(12), 0)
+            cat.setTextSize(14f)
+            cat.setSingleLine(true)
+            cat.setPadding(dp(15), 0, dp(15), 0)
+            cat.minWidth = dp(72)
             cat.gravity = Gravity.CENTER
             cat.setAccessibleFocus("focus:category:${currentCategories[i]}", "分类，${currentCategories[i]}")
             cat.setFocusable(true)
             cat.setClickable(true)
-            // 设置选中状态
-            if (i == currentCategoryIndex) {
-                cat.setTextColor(Color.rgb(217, 184, 121))
-                cat.setBackgroundColor(Color.argb(30, 217, 184, 121))
-            } else {
-                cat.setTextColor(Color.argb(200, 241, 241, 241))
-                cat.setBackgroundColor(Color.TRANSPARENT)
-            }
+            // 商用点歌机横向分类标签：酒红选中态、香槟金描边，遥控器焦点清晰可见。
+            cat.isSelected = i == currentCategoryIndex
+            cat.setTextColor(if (i == currentCategoryIndex) Color.rgb(79, 225, 242) else Color.rgb(241, 239, 255))
+            cat.setBackgroundResource(R.drawable.bg_category_tab_selector)
             cat.setOnClickListener(View.OnClickListener { v: View? ->
                 currentCategoryIndex = index
                 updateCategories()
@@ -10264,7 +10858,7 @@ class MainActivity : AppCompatActivity() {
                 loadBrowsePage()
             })
             installPressFeedback(cat)
-            categoryList!!.addView(cat)
+            categoryList!!.addView(cat, LinearLayout.LayoutParams(-2, -1).apply { marginEnd = dp(8); topMargin = dp(2); bottomMargin = dp(2) })
         }
         restoreFocusBookmark(focusedCategory)
     }
@@ -10425,11 +11019,25 @@ class MainActivity : AppCompatActivity() {
                     "singer_id" -> {
                         songs = library.muse.songsBySinger(key.param, offset, key.pageSize)
                         if (total < 0) total = library.muse.countSongsBySinger(key.param)
+                        if (songs.isNullOrEmpty() || total == 0) {
+                            val singerName = library.muse.singerNameById(key.param).orEmpty()
+                            if (singerName.isNotBlank()) {
+                                songs = library.muse.songsBySingerName(singerName, offset, key.pageSize)
+                                total = library.muse.countSongsBySingerName(singerName)
+                            }
+                        }
                     }
 
                     "singer_id_search" -> {
                         songs = library.muse.searchSongsBySinger(key.param, key.searchQuery, offset, key.pageSize)
                         if (total < 0) total = library.muse.countSearchSongsBySinger(key.param, key.searchQuery)
+                        if (songs.isNullOrEmpty() || total == 0) {
+                            val singerName = library.muse.singerNameById(key.param).orEmpty()
+                            if (singerName.isNotBlank()) {
+                                songs = library.muse.searchSongs(singerName + " " + key.searchQuery, offset, key.pageSize, key.language)
+                                total = library.muse.searchSongCount(singerName + " " + key.searchQuery)
+                            }
+                        }
                     }
 
                     "search" -> {
@@ -10487,6 +11095,7 @@ class MainActivity : AppCompatActivity() {
         browseTotalPages = (result.total + key.pageSize - 1) / key.pageSize
         visibleSongs.clear()
         visibleSongs.addAll(result.songs)
+        if (key.mode == "rank") updateRankSpotlight()
         renderSongList()
         updatePageInfo()
     }
@@ -10836,9 +11445,17 @@ class MainActivity : AppCompatActivity() {
      * 更新已点数量徽标(顶栏 + 子页面旧按钮)
      */
     private fun updateOrderBadge() {
-        val n = if (orderQueue == null) 0 else orderQueue.size
-        if (textTopOrderBadge != null) textTopOrderBadge!!.setText(n.toString())
-        if (textOrderBadge != null) textOrderBadge!!.setText(n.toString())
+        val n = orderQueue?.size ?: 0
+        val label = n.toString()
+        textTopOrderBadge?.let { badge ->
+            if (badge.text?.toString() != label) badge.text = label
+            badge.contentDescription = "已点歌曲 $n 首"
+        }
+        textOrderBadge?.let { badge ->
+            if (badge.text?.toString() != label) badge.text = label
+            badge.contentDescription = "已点歌曲 $n 首"
+        }
+        btnTopOrder?.contentDescription = "已点歌曲，当前 $n 首"
     }
 
     /**
@@ -11466,24 +12083,24 @@ class MainActivity : AppCompatActivity() {
         /** 手机端搜索结果缓存有效期(与上方缓存策略说明保持一致)。 */
         private const val SEARCH_CACHE_TTL_MS = 60_000L
 
-        // ===== 主题色(对标原版麦动 配色) =====
-        /** 主背景:极深蓝黑(原版 #080C12 系)  */
-        private val BG = Color.rgb(19, 29, 37)
+        // ===== 晓晓呀独立 KTV 主题色：炭黑底、酒红主操作、暖金辅助 =====
+        /** 主背景：深炭黑，避免蓝紫播放器观感。 */
+        private val BG = Color.rgb(11, 14, 20)
 
-        /** 面板背景:深蓝灰(原版卡片底色)  */
-        private val PANEL = Color.rgb(39, 54, 64)
+        /** 面板背景：略亮一级，保证电视远距离可读性。 */
+        private val PANEL = Color.rgb(23, 28, 37)
 
-        /** 次级面板:更深(列表区背景)  */
-        private val PANEL_2 = Color.rgb(29, 42, 51)
+        /** 次级面板：搜索、列表与弹窗内部底色。 */
+        private val PANEL_2 = Color.rgb(16, 20, 28)
 
-        /** 焦点色:香槟金,用于商业版遥控器焦点态。 */
-        private val FOCUS = Color.rgb(225, 196, 139)
+        /** 焦点色：高对比 KTV 红，适配遥控器方向键焦点。 */
+        private val FOCUS = Color.rgb(235, 76, 94)
 
-        /** 金色:标题与高亮(原版 color_yellow_3 #FFE363 系)  */
-        private val GOLD = Color.rgb(220, 184, 119)
+        /** 暖金：仅用于标题、状态和次级强调。 */
+        private val GOLD = Color.rgb(241, 196, 104)
 
-        /** 强调色:香槟金,避免高饱和红色造成廉价感。 */
-        private val ACCENT_RED = Color.rgb(217, 184, 121)
+        /** 主强调色：酒红，用于选中态和关键操作。 */
+        private val ACCENT_RED = Color.rgb(217, 54, 72)
 
         /** 文本白:主文本色(原版 color_white_3 #F1F1F1)  */
         private val TEXT_WHITE = Color.rgb(241, 241, 241)
@@ -11491,11 +12108,11 @@ class MainActivity : AppCompatActivity() {
         /** 次要文本:70% 透明白(原版 color_white_3_70)  */
         private val TEXT_DIM = Color.argb(205, 232, 238, 240)
 
-        /** 导航选中背景:低透明香槟金。 */
-        private val NAV_SELECTED = Color.argb(42, 217, 184, 121)
+        /** 导航选中背景：低透明酒红。 */
+        private val NAV_SELECTED = Color.argb(46, 217, 54, 72)
 
         /** 分割线颜色  */
-        private val DIVIDER = Color.argb(80, 241, 241, 241)
+        private val DIVIDER = Color.argb(42, 220, 226, 236)
         private const val PREFS = "ktv"
         private const val KEY_CATALOG_URL = "catalog_url"
         private const val KEY_SHOW_MOBILE_QR = "show_mobile_qr"

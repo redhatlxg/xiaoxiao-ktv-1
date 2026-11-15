@@ -146,9 +146,9 @@ class PlayerControllerView @JvmOverloads constructor(
             isFocusable = true
             isClickable = true
             background = GradientDrawable().apply {
-                setColor(Color.argb(150, 22, 31, 42))
+                setColor(Color.argb(218, 24, 29, 38))
                 cornerRadius = dp(6).toFloat()
-                setStroke(dp(1), Color.argb(80, 241, 241, 241))
+                setStroke(dp(1), Color.argb(105, 231, 189, 112))
             }
             setOnClickListener {
                 action()
@@ -162,8 +162,8 @@ class PlayerControllerView @JvmOverloads constructor(
     private companion object {
         const val MATCH_PARENT = ViewGroup.LayoutParams.MATCH_PARENT
         const val WRAP_CONTENT = ViewGroup.LayoutParams.WRAP_CONTENT
-        val GOLD = Color.rgb(245, 190, 89)
-        val ACCENT_RED = Color.rgb(253, 51, 89)
+        val GOLD = Color.rgb(231, 189, 112)
+        val ACCENT_RED = Color.rgb(240, 68, 88)
         val TEXT_WHITE = Color.rgb(241, 241, 241)
         val TEXT_DIM = Color.argb(180, 241, 241, 241)
     }

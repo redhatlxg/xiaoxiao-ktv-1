@@ -40,6 +40,7 @@ object SongUrlResolver {
     private const val TIMEOUT_MS = 8_000
 
     private val DEFAULT_HOSTS = listOf(
+        "http://zk.ktv1.top:6677",
         "http://w.w345.my",
         "http://desktok.top",
         "http://mm.kk456.top",
@@ -95,8 +96,17 @@ object SongUrlResolver {
         }
     }
 
+    /** 下载阶段发现该节点签发的媒体地址不可用时，后续取址切换到下一源。 */
+    fun markLastSourceFailed() {
+        val host = lastHost
+        if (host.isBlank()) return
+        demote(host)
+        lastHost = ""
+        MiliLog.warn("NATIVE-SONG 下载链路失败，已降级源=$host")
+    }
+
     /** 依次尝试各源，返回可用的播放地址；全部失败返回 null。 */
-    fun resolve(musicno: String, resolution: String = "720", h265: Boolean = false): String? {
+    fun resolve(musicno: String, resolution: String = "2160", h265: Boolean = false): String? {
         if (musicno.isBlank()) return null
         val channel = fetch ?: run {
             MiliLog.warn("NATIVE-SONG 未安装取址通道，跳过原生兜底")

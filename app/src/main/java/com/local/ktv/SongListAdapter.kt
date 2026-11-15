@@ -47,7 +47,7 @@ class SongListAdapter(
     private val rowsPerPage: Int = 0,
 ) : BaseAdapter() {
     private val density = context.resources.displayMetrics.density
-    private val columns = if (mode in SINGLE_COLUMN_MODES) 1 else 2
+    private val columns = columnsForMode(mode, context.resources.configuration.screenWidthDp)
     private val cardIds = HashMap<String, Int>()
 
     /** 当前行高(px)。0 = 保持内容自然高度(滚动列表用)。 */
@@ -129,10 +129,10 @@ class SongListAdapter(
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(4), 0, dp(4))
+            setPadding(dp(12), dp(4), dp(4), dp(4))
             setBackgroundResource(R.drawable.ott_bg_item)
             val info = songInfo(song, stacked = true)
-            addView(info, LinearLayout.LayoutParams(0, dp(52), 1f))
+            addView(info, LinearLayout.LayoutParams(0, dp(54), 1f))
             if (!state.local || state.queued) {
                 addView(icon(if (state.queued) R.drawable.ic_order_song else R.drawable.ott_ic_download, null), LinearLayout.LayoutParams(dp(40), dp(40)))
             }
@@ -154,21 +154,89 @@ class SongListAdapter(
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundResource(R.drawable.ott_bg_item)
+            setPadding(dp(10), dp(5), dp(8), dp(5))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(if (state.current) Color.rgb(55, 35, 42) else Color.rgb(29, 39, 51))
+                cornerRadius = dp(12).toFloat()
+                setStroke(
+                    dp(1),
+                    if (state.current) Color.rgb(197, 150, 91) else Color.rgb(54, 68, 84),
+                )
+            }
+
             val badge = if (order <= 3) {
                 icon(
                     intArrayOf(R.drawable.ic_rank_order_1, R.drawable.ic_rank_order_2, R.drawable.ic_rank_order_3)[order - 1],
                     null,
-                )
+                ).apply {
+                    setPadding(dp(3), dp(3), dp(3), dp(3))
+                }
             } else {
-                text(order.toString(), 16, Color.WHITE, Gravity.CENTER)
+                text(
+                    order.toString(),
+                    17,
+                    if (order <= 10) Color.rgb(237, 202, 145) else Color.rgb(173, 186, 201),
+                    Gravity.CENTER,
+                ).apply {
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.OVAL
+                        setColor(Color.rgb(42, 53, 67))
+                        setStroke(dp(1), Color.rgb(77, 91, 108))
+                    }
+                }
             }
-            addView(badge, LinearLayout.LayoutParams(dp(47), dp(48)))
-            addView(songInfo(song, stacked = false), LinearLayout.LayoutParams(0, dp(48), 1f))
-            if (!state.local || state.queued) {
-                addView(icon(if (state.queued) R.drawable.ic_order_song else R.drawable.ott_ic_download, null), LinearLayout.LayoutParams(dp(40), dp(40)))
+            addView(badge, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(8) })
+
+            val info = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(
+                    text(song.title.orEmpty(), 17, Color.rgb(250, 247, 241), Gravity.CENTER_VERTICAL),
+                    LinearLayout.LayoutParams(-1, 0, 1f),
+                )
+                addView(
+                    text(song.singer.orEmpty(), 12, Color.rgb(167, 180, 194), Gravity.CENTER_VERTICAL),
+                    LinearLayout.LayoutParams(-1, 0, 1f),
+                )
             }
-            addView(icon(R.drawable.ott_ic_more, null), LinearLayout.LayoutParams(dp(40), dp(40)))
+            addView(info, LinearLayout.LayoutParams(0, dp(54), 1f).apply { marginEnd = dp(8) })
+
+            val statusLabel = when {
+                state.current -> "正在唱"
+                state.queued -> "已点"
+                state.local -> "已缓存"
+                else -> "云端"
+            }
+            addView(
+                text(statusLabel, 10, Color.rgb(224, 190, 139), Gravity.CENTER).apply {
+                    setPadding(dp(7), dp(4), dp(7), dp(4))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(10).toFloat()
+                        setColor(Color.rgb(48, 48, 55))
+                        setStroke(dp(1), Color.rgb(100, 81, 62))
+                    }
+                },
+                LinearLayout.LayoutParams(-2, dp(28)).apply { marginEnd = dp(6) },
+            )
+
+            val primaryIcon = when {
+                state.queued -> R.drawable.ic_order_song
+                state.local -> R.drawable.ott_ic_play
+                else -> R.drawable.ott_ic_download
+            }
+            val primaryAction: () -> Unit = when {
+                state.queued || state.local -> ({ callbacks.onPrimary(song) })
+                else -> ({ callbacks.onDownload(song) })
+            }
+            addView(
+                icon(primaryIcon, primaryAction),
+                LinearLayout.LayoutParams(dp(38), dp(38)),
+            )
+            addView(
+                icon(R.drawable.ott_ic_more) { callbacks.onMore(song) },
+                LinearLayout.LayoutParams(dp(38), dp(38)),
+            )
+
             configureSongCard(this, song, index)
         }
     }
@@ -241,11 +309,11 @@ class SongListAdapter(
         orientation = if (stacked) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         if (stacked) {
-            addView(text(song.title.orEmpty(), 16, Color.WHITE, Gravity.START or Gravity.CENTER_VERTICAL), LinearLayout.LayoutParams(-1, 0, 1f))
-            addView(text(song.singer.orEmpty(), 14, Color.rgb(193, 193, 193), Gravity.START or Gravity.CENTER_VERTICAL), LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(text(song.title.orEmpty(), 17, Color.rgb(250, 247, 241), Gravity.START or Gravity.CENTER_VERTICAL), LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(text(song.singer.orEmpty(), 13, Color.rgb(169, 158, 151), Gravity.START or Gravity.CENTER_VERTICAL), LinearLayout.LayoutParams(-1, 0, 1f))
         } else {
-            addView(text(song.title.orEmpty(), 16, Color.WHITE, Gravity.START or Gravity.CENTER_VERTICAL), LinearLayout.LayoutParams(0, -1, 1f).apply { marginEnd = dp(12) })
-            addView(text(song.singer.orEmpty(), 16, Color.rgb(193, 193, 193), Gravity.START or Gravity.CENTER_VERTICAL), LinearLayout.LayoutParams(0, -1, 1f))
+            addView(text(song.title.orEmpty(), 17, Color.rgb(250, 247, 241), Gravity.START or Gravity.CENTER_VERTICAL), LinearLayout.LayoutParams(0, -1, 1f).apply { marginEnd = dp(12) })
+            addView(text(song.singer.orEmpty(), 13, Color.rgb(169, 158, 151), Gravity.START or Gravity.CENTER_VERTICAL), LinearLayout.LayoutParams(0, -1, 1f))
         }
     }
 
@@ -311,6 +379,13 @@ class SongListAdapter(
     companion object {
         const val FOCUS_PREFIX = "focus:song:"
         private val SINGLE_COLUMN_MODES = setOf("rank", "ordered", "downloads", "sang")
+
+        /** Catalog cards use one column when the display cannot give each card enough text width. */
+        fun columnsForMode(mode: String, widthDp: Int): Int = when {
+            mode in SINGLE_COLUMN_MODES -> 1
+            widthDp >= 920 -> 2
+            else -> 1
+        }
 
         private fun songKey(song: Song): String =
             (song.id ?: song.dbId ?: song.filename ?: "${song.title}|${song.singer}").toString()

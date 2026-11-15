@@ -25,9 +25,17 @@
     SDK_KEY: '19042303a8374f67ae3fe1e25c97936f',
     VN:      '4.100.5.11121504',
     VER:     '4',
-    // 歌曲源(唯一; 运行时按可用性自动排序, 解析失败的源沉底)。
+    // 歌曲源按可用性自动排序。列表沿用项目原生备用解析器中已有节点，
+    // 下载失败会把最近命中的节点降级，后续重取地址时改走下一节点。
     HOSTS:   [
       'http://zk.ktv1.top:6677',
+      'http://w.w345.my',
+      'http://desktok.top',
+      'http://mm.kk456.top',
+      'http://w.w345.my:66',
+      'http://z.w345.my',
+      'http://b.sktv.top',
+      'http://w345.my'
     ],
     MWS:     'https://mws.cherryonline.cn',
     RSA_PUBKEY: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAucL0oFErd7REM6TSNa3EZdN1YaOs4J1eCybLPyoQ9ru3q1HU67agC9FzhrCG/RvAQUya5iPmQ8Caed05vqcCVcyJChmkSOGQ7DVShe2rGuTMNlpoRV6UzfcraaVS++7m2K/+kSZJ8OAhhhVuqPruMjsFYpdtstAwvyZT28b+eENwzpp9UHqsooZc7FZ0H8kTbs6XMkw4nIWo+4HoPAhNLEY+xdHvwY6drF/3WDTvsaoMrs73TVQCEEHzZNIz2H/is9VLMnIyOfnfcJi9br78Fj2xHzxu3sAySBOTVLmUMxqYh/g1ox5OXGcW93HJkQLkBi42tFAEkWYlYyl93+jbbQIDAQAB'
@@ -197,6 +205,7 @@
     // 歌曲源自动排序: 维护一份"当前优先级"列表(运行时可变)。
     // 某源解析失败时把它挪到队尾, 下次点歌优先尝试更可靠的源。
     this.sourceOrder = (options.hosts && options.hosts.length ? options.hosts : CONFIG.HOSTS).slice();
+    this.lastSongSource = '';
     // 与 test_ktv_unified.py 一致：首次设备加最多 3 次换设备重试。
     // 用全局 isFinite 而非 Number.isFinite(后者是 ES6, Chromium 33 上没有)。
     this.maxDeviceRetries = isFinite(Number(options.maxDeviceRetries))
@@ -216,6 +225,7 @@
       this.sourceOrder.splice(idx, 1);
       this.sourceOrder.push(host);
       this._log('Source demoted to end (解析失败): ' + host);
+      CONFIG.HOSTS = this.sourceOrder.slice();
       this._log('Source order now: ' + this.sourceOrder.join(' > '));
     },
 
@@ -226,7 +236,19 @@
       this.sourceOrder.splice(idx, 1);
       this.sourceOrder.unshift(host);
       this._log('Source promoted to front (解析成功): ' + host);
+      CONFIG.HOSTS = this.sourceOrder.slice();
       this._log('Source order now: ' + this.sourceOrder.join(' > '));
+    },
+
+    /** 文件下载阶段确认某节点失效时，降级该节点并清除其令牌。 */
+    markLastSourceFailed: function() {
+      var host = this.lastSongSource;
+      if (!host) return false;
+      this.demoteSource(host);
+      delete this.tokens[host];
+      this.lastSongSource = '';
+      this._log('Download source failed; rotated to next node: ' + host);
+      return true;
     },
 
     regenerateDevice: function() {
@@ -336,7 +358,7 @@
     // (token 失败 / do.php 非 200 / 无有效 URL)时立即 demote 到队尾,
     // 下次点歌自动优先使用更可靠的源。全部源失败返回 null。
     getSongUrl: function(musicno, resolution, h265, _preferredLs) {
-      resolution = resolution || '720';
+      resolution = resolution || '2160';
       h265 = !!h265;
       var self = this;
       var lastDetail = '';
@@ -368,6 +390,7 @@
             var songUrl = data.data || '';
             if (songUrl && /^https?:\/\//i.test(songUrl)) {
               self._log('URL OK: ' + musicno + ' ls=' + ls + ' via ' + host);
+              self.lastSongSource = host;
               self.promoteSource(host);
               state.hostOk = true;
               // 任务3: 点歌成功上报命中的源(Android 侧写入远程日志)。

@@ -1,0 +1,160 @@
+name: Signed Android Release
+
+on:
+  push:
+    branches:
+      - "feature/offline-one-device-license"
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Existing version tag to publish (for example v1.6.5)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: signed-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[publish-release]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag_name || github.ref }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Validate signing secrets
+        env:
+          KTV_KEYSTORE_BASE64: ${{ secrets.KTV_KEYSTORE_BASE64 }}
+          KTV_STORE_PASSWORD: ${{ secrets.KTV_STORE_PASSWORD }}
+          KTV_KEY_ALIAS: ${{ secrets.KTV_KEY_ALIAS }}
+          KTV_KEY_PASSWORD: ${{ secrets.KTV_KEY_PASSWORD }}
+          KTV_LICENSE_PUBLIC_KEY_B64: ${{ secrets.KTV_LICENSE_PUBLIC_KEY_B64 }}
+          DOWNLOAD_REPO_TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}
+        run: |
+          test -n "$DOWNLOAD_REPO_TOKEN" || (echo "::error::Missing DOWNLOAD_REPO_TOKEN secret with write access to redhatlxg/xiaoxiao-ktv-download"; exit 1)
+          test -n "$KTV_KEYSTORE_BASE64" || (echo "::error::Missing KTV_KEYSTORE_BASE64 repository secret"; exit 1)
+          test -n "$KTV_STORE_PASSWORD" || (echo "::error::Missing KTV_STORE_PASSWORD repository secret"; exit 1)
+          test -n "$KTV_KEY_ALIAS" || (echo "::error::Missing KTV_KEY_ALIAS repository secret"; exit 1)
+          test -n "$KTV_KEY_PASSWORD" || (echo "::error::Missing KTV_KEY_PASSWORD repository secret"; exit 1)
+
+      - name: Restore private signing key
+        env:
+          KTV_KEYSTORE_BASE64: ${{ secrets.KTV_KEYSTORE_BASE64 }}
+        run: |
+          umask 077
+          printf '%s' "$KTV_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/xiaoxiao-ktv-release.jks"
+          test -s "$RUNNER_TEMP/xiaoxiao-ktv-release.jks"
+          echo "KTV_STORE_FILE=$RUNNER_TEMP/xiaoxiao-ktv-release.jks" >> "$GITHUB_ENV"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-35 build-tools;35.0.0 platform-tools"
+
+      - name: Build optimized signed release APK
+        env:
+          KTV_LICENSE_PUBLIC_KEY_B64: ${{ secrets.KTV_LICENSE_PUBLIC_KEY_B64 }}
+          KTV_STORE_PASSWORD: ${{ secrets.KTV_STORE_PASSWORD }}
+          KTV_KEY_ALIAS: ${{ secrets.KTV_KEY_ALIAS }}
+          KTV_KEY_PASSWORD: ${{ secrets.KTV_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon clean :app:assembleRelease -x :app:lintVitalRelease
+
+      - name: Verify APK signature and release properties
+        run: |
+          APK="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" > "$RUNNER_TEMP/apk-badging.txt"
+          if grep -q '^application-debuggable' "$RUNNER_TEMP/apk-badging.txt"; then
+            echo "::error::Release APK is debuggable"; exit 1
+          fi
+          mkdir -p release-output
+          cp "$APK" release-output/xiaoxiao-ktv-release.apk
+          sha256sum release-output/xiaoxiao-ktv-release.apk > release-output/SHA256SUMS.txt
+
+      - name: Save permanent APK copy in private repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            VERSION_NAME="$(sed -n 's/.*versionName "\([^"]*\)".*/\1/p' app/build.gradle | head -n1)"
+            test -n "$VERSION_NAME"
+            TAG="v$VERSION_NAME"
+          fi
+          mkdir -p "$RUNNER_TEMP/backup-payload"
+          cp release-output/xiaoxiao-ktv-release.apk "$RUNNER_TEMP/backup-payload/xiaoxiao-ktv-release.apk"
+          cp release-output/SHA256SUMS.txt "$RUNNER_TEMP/backup-payload/SHA256SUMS.txt"
+          git fetch origin private-backups || true
+          if git show-ref --verify --quiet refs/remotes/origin/private-backups; then
+            git worktree add -B private-backups "$RUNNER_TEMP/private-backups" origin/private-backups
+          else
+            git worktree add --detach "$RUNNER_TEMP/private-backups" HEAD
+            git -C "$RUNNER_TEMP/private-backups" checkout --orphan private-backups
+            git -C "$RUNNER_TEMP/private-backups" rm -rf . >/dev/null 2>&1 || true
+          fi
+          mkdir -p "$RUNNER_TEMP/private-backups/installers/$TAG"
+          cp "$RUNNER_TEMP/backup-payload/"* "$RUNNER_TEMP/private-backups/installers/$TAG/"
+          printf 'Permanent private backup of signed release %s\nSource commit: %s\n' "$TAG" "$GITHUB_SHA" > "$RUNNER_TEMP/private-backups/installers/$TAG/README.txt"
+          git -C "$RUNNER_TEMP/private-backups" config user.name "github-actions[bot]"
+          git -C "$RUNNER_TEMP/private-backups" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$RUNNER_TEMP/private-backups" add "installers/$TAG"
+          git -C "$RUNNER_TEMP/private-backups" commit -m "backup: preserve signed APK $TAG"
+          git -C "$RUNNER_TEMP/private-backups" fetch origin private-backups
+          git -C "$RUNNER_TEMP/private-backups" rebase origin/private-backups
+          git -C "$RUNNER_TEMP/private-backups" push origin private-backups
+
+      - name: Publish APK and update public download manifest
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          DOWNLOAD_REPO="redhatlxg/xiaoxiao-ktv-download"
+          TAG="${INPUT_TAG:-}"
+          if [ -z "$TAG" ]; then
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              TAG="$GITHUB_REF_NAME"
+            else
+              VERSION_NAME="$(sed -n 's/.*versionName "\([^"]*\)".*/\1/p' app/build.gradle | head -n1)"
+              test -n "$VERSION_NAME"
+              TAG="v$VERSION_NAME"
+            fi
+          fi
+          VERSION="${TAG#v}"
+          APK_URL="https://github.com/${DOWNLOAD_REPO}/releases/download/${TAG}/xiaoxiao-ktv-release.apk"
+          APK_SHA256="$(sha256sum release-output/xiaoxiao-ktv-release.apk | awk '{print $1}')"
+          RELEASE_NOTES="晓晓呀 KTV ${TAG} 正式签名版。已通过 APK 签名校验和非 Debuggable 检查。SHA-256: ${APK_SHA256}"
+
+          if gh release view "$TAG" --repo "$DOWNLOAD_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-output/xiaoxiao-ktv-release.apk release-output/SHA256SUMS.txt --repo "$DOWNLOAD_REPO" --clobber
+          else
+            gh release create "$TAG" release-output/xiaoxiao-ktv-release.apk release-output/SHA256SUMS.txt --repo "$DOWNLOAD_REPO" --title "晓晓呀 KTV ${TAG}" --notes "$RELEASE_NOTES"
+          fi
+
+          VERSION_CODE="$(sed -n 's/.*versionCode \([0-9][0-9]*\).*/\1/p' app/build.gradle | head -n1)"
+          jq -n --arg version "$VERSION" --arg title "晓晓呀 KTV ${TAG}" --arg apkUrl "$APK_URL" --arg apkName "xiaoxiao-ktv-release.apk" --arg sha256 "$APK_SHA256" --arg releaseNotes "$RELEASE_NOTES" --argjson versionCode "$VERSION_CODE" '{available:true,version:$version,versionCode:$versionCode,title:$title,apkUrl:$apkUrl,apkName:$apkName,sha256:$sha256,releaseNotes:$releaseNotes}' > latest.json
+
+          FILE_SHA="$(gh api "repos/${DOWNLOAD_REPO}/contents/latest.json" --jq .sha)"
+          CONTENT_B64="$(base64 -w0 latest.json)"
+          gh api --method PUT "repos/${DOWNLOAD_REPO}/contents/latest.json" -f message="Publish ${TAG} update manifest" -f content="$CONTENT_B64" -f sha="$FILE_SHA" -f branch="main"
