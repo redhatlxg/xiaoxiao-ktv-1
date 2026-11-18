@@ -10215,16 +10215,21 @@ class MainActivity : AppCompatActivity() {
             val index = i
             val cat = TextView(this)
             cat.setText(currentCategories.get(i))
-            cat.setTextSize(16f)
-            cat.setPadding(dp(12), 0, dp(12), 0)
+            cat.setTextSize(18f)
+            cat.setPadding(dp(18), dp(6), dp(18), dp(6))
             cat.gravity = Gravity.CENTER
+            cat.minHeight = dp(38)
+            cat.background = roundedBg(Color.argb(24, 255, 255, 255), 9, Color.argb(35, 255, 255, 255), 1)
             cat.setAccessibleFocus("focus:category:${currentCategories[i]}", "分类，${currentCategories[i]}")
             cat.setFocusable(true)
             cat.setClickable(true)
             // 设置选中状态
             if (i == currentCategoryIndex) {
-                cat.setTextColor(Color.rgb(217, 184, 121))
-                cat.setBackgroundColor(Color.argb(30, 217, 184, 121))
+                cat.setTextColor(Color.rgb(255, 226, 164))
+                cat.setBackground(GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.argb(70, 218, 160, 60), Color.argb(38, 118, 76, 24))).apply {
+                    cornerRadius = dp(9).toFloat()
+                    setStroke(dp(1), Color.argb(150, 218, 160, 60))
+                })
             } else {
                 cat.setTextColor(Color.argb(200, 241, 241, 241))
                 cat.setBackgroundColor(Color.TRANSPARENT)
@@ -10286,7 +10291,9 @@ class MainActivity : AppCompatActivity() {
                 loadBrowsePage()
             })
             installPressFeedback(cat)
-            categoryList!!.addView(cat)
+            val tabParams = LinearLayout.LayoutParams(-2, dp(40))
+            tabParams.setMargins(dp(4), 0, dp(4), 0)
+            categoryList!!.addView(cat, tabParams)
         }
         restoreFocusBookmark(focusedCategory)
     }
